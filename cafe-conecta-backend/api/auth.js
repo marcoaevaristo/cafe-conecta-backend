@@ -45,7 +45,7 @@ router.post('/cadastro', async (req, res) => {
 
     res.status(201).json({ token, usuario });
   } catch (err) {
-    console.error('Erro no cadastro:', err);
+    console.error('Erro no cadastro DETALHADO:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
     res.status(500).json({ error: 'Erro ao criar conta' });
   }
 });
