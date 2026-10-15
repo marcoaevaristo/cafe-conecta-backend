@@ -29,6 +29,7 @@ app.use('/alertas', alertasRoutes);
 app.use('/favoritos', favoritosRoutes);
 app.use('/mensagens', mensagensRoutes);
 app.use('/planos', planosRoutes);
+app.use('/debug', require('./api/debug'));
 app.use('/webhook', webhookRoutes);
 app.use('/dashboard', dashboardRoutes);
 
