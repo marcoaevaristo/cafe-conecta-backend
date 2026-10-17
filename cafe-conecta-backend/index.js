@@ -10,6 +10,7 @@ const mensagensRoutes = require('./api/mensagens');
 const planosRoutes = require('./api/planos');
 const webhookRoutes = require('./api/webhook');
 const dashboardRoutes = require('./api/dashboard');
+const cotacoesRoutes = require('./api/cotacoes');
 
 const app = express();
 
@@ -32,6 +33,7 @@ app.use('/planos', planosRoutes);
 app.use('/debug', require('./api/debug'));
 app.use('/webhook', webhookRoutes);
 app.use('/dashboard', dashboardRoutes);
+app.use('/api/cotacoes', cotacoesRoutes);
 
 // 404
 app.use((req, res) => {
