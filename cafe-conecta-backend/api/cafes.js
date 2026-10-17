@@ -55,10 +55,18 @@ router.get('/:id', async (req, res) => {
 
 // POST /cafes — criar lote (requer auth)
 router.post('/', authMiddleware, async (req, res) => {
-  const { tipo, classificacao, quantidade_sacas, preco_saca, cidade, estado, regiao, fazenda, score, descricao } = req.body;
+  const {
+    tipo, classificacao,
+    quantidade_sacas, quantidade, // aceita ambos
+    preco_saca,
+    cidade, estado, regiao, fazenda, score, descricao,
+    bebida, peneira, safra, status,
+  } = req.body;
 
-  if (!tipo || !classificacao || !quantidade_sacas || !preco_saca || !cidade || !estado) {
-    return res.status(400).json({ error: 'Campos obrigatórios faltando' });
+  const qtd = quantidade_sacas ?? quantidade;
+
+  if (!tipo || !classificacao || !qtd || !cidade) {
+    return res.status(400).json({ error: 'Campos obrigatórios: tipo, classificação, quantidade e cidade' });
   }
 
   try {
@@ -66,8 +74,19 @@ router.post('/', authMiddleware, async (req, res) => {
       .from('cafes')
       .insert({
         usuario_id: req.usuario.id,
-        tipo, classificacao, quantidade_sacas, preco_saca,
-        cidade, estado, regiao, fazenda, score, descricao
+        tipo, classificacao,
+        quantidade_sacas: qtd,
+        preco_saca: preco_saca ?? null,
+        cidade,
+        estado: estado ?? null,
+        regiao: regiao ?? null,
+        fazenda: fazenda ?? null,
+        score: score ?? null,
+        descricao: descricao ?? null,
+        bebida: bebida ?? null,
+        peneira: peneira ?? null,
+        safra: safra ?? null,
+        status: status ?? 'ativo',
       })
       .select()
       .single();
