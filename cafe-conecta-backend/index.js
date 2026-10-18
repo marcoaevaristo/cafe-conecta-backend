@@ -33,6 +33,7 @@ app.use('/planos', planosRoutes);
 app.use('/debug', require('./api/debug'));
 app.use('/webhook', webhookRoutes);
 app.use('/dashboard', dashboardRoutes);
+app.use('/', dashboardRoutes); // expõe /historico-precos na raiz
 app.use('/api/cotacoes', cotacoesRoutes);
 
 // 404
