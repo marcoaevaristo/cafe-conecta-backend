@@ -109,11 +109,11 @@ router.put('/:id', authMiddleware, async (req, res) => {
       return res.status(403).json({ error: 'Sem permissão' });
     }
 
-    const { tipo, classificacao, quantidade_sacas, preco_saca, cidade, estado, regiao, fazenda, score, descricao, status } = req.body;
+    const { tipo, classificacao, quantidade_sacas, preco_saca, cidade, estado, regiao, fazenda, score, descricao, status, bebida, peneira, safra, lat, lng } = req.body;
 
     const { data, error } = await supabase
       .from('cafes')
-      .update({ tipo, classificacao, quantidade_sacas, preco_saca, cidade, estado, regiao, fazenda, score, descricao, status })
+      .update({ tipo, classificacao, quantidade_sacas, preco_saca, cidade, estado, regiao, fazenda, score, descricao, status, bebida, peneira, safra, lat, lng })
       .eq('id', req.params.id)
       .select()
       .single();
