@@ -11,6 +11,7 @@ const planosRoutes = require('./api/planos');
 const webhookRoutes = require('./api/webhook');
 const dashboardRoutes = require('./api/dashboard');
 const cotacoesRoutes = require('./api/cotacoes');
+const pagbankRoutes = require('./api/pagbank');
 
 const app = express();
 
@@ -35,6 +36,7 @@ app.use('/webhook', webhookRoutes);
 app.use('/dashboard', dashboardRoutes);
 app.use('/', dashboardRoutes); // expõe /historico-precos na raiz
 app.use('/api/cotacoes', cotacoesRoutes);
+app.use('/pagbank', pagbankRoutes);
 
 // 404
 app.use((req, res) => {
