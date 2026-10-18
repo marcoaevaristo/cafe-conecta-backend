@@ -61,6 +61,31 @@ router.put('/:id/toggle', authMiddleware, async (req, res) => {
   }
 });
 
+// PATCH /alertas/:id — usado pelo app: { ativo: true|false }
+router.patch('/:id', authMiddleware, async (req, res) => {
+  try {
+    const { data: alerta } = await supabase
+      .from('alertas').select('usuario_id').eq('id', req.params.id).single();
+
+    if (!alerta || alerta.usuario_id !== req.usuario.id) {
+      return res.status(403).json({ error: 'Sem permissão' });
+    }
+
+    const ativo = req.body.ativo === true || req.body.ativo === 1 || req.body.ativo === 'true';
+    const { data, error } = await supabase
+      .from('alertas')
+      .update({ ativo })
+      .eq('id', req.params.id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao atualizar alerta' });
+  }
+});
+
 // DELETE /alertas/:id
 router.delete('/:id', authMiddleware, async (req, res) => {
   try {

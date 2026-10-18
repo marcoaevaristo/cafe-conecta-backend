@@ -125,6 +125,34 @@ router.put('/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// PATCH /cafes/:id/status — usado pelo app (ativo | pausado | encerrado)
+router.patch('/:id/status', authMiddleware, async (req, res) => {
+  const { status } = req.body;
+  if (!['ativo', 'pausado', 'encerrado'].includes(status)) {
+    return res.status(400).json({ error: 'Status inválido' });
+  }
+  try {
+    const { data: cafe } = await supabase
+      .from('cafes').select('usuario_id').eq('id', req.params.id).single();
+
+    if (!cafe || cafe.usuario_id !== req.usuario.id) {
+      return res.status(403).json({ error: 'Sem permissão' });
+    }
+
+    const { data, error } = await supabase
+      .from('cafes')
+      .update({ status })
+      .eq('id', req.params.id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao atualizar status do lote' });
+  }
+});
+
 // DELETE /cafes/:id
 router.delete('/:id', authMiddleware, async (req, res) => {
   try {

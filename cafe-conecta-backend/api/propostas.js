@@ -1,6 +1,7 @@
 const express = require('express');
 const supabase = require('../lib/supabase');
 const { authMiddleware } = require('../middleware/auth');
+const { propostaParaApp, statusPropostaParaDb } = require('../lib/mapper');
 
 const router = express.Router();
 
@@ -19,18 +20,30 @@ router.get('/', authMiddleware, async (req, res) => {
 
     const { data, error } = await query;
     if (error) throw error;
-    res.json(data);
+    res.json((data || []).map(propostaParaApp));
   } catch (err) {
     res.status(500).json({ error: 'Erro ao buscar propostas' });
   }
 });
 
-// POST /propostas
+// POST /propostas — aceita o formato do banco e o do app
 router.post('/', authMiddleware, async (req, res) => {
-  const { cafe_id, valor_proposto, quantidade_sacas, mensagem } = req.body;
+  const b = req.body;
+  const cafe_id = b.cafe_id;
+  const valor_proposto = b.valor_proposto ?? b.preco_ofertado;
+  const quantidade_sacas = b.quantidade_sacas;
+
+  // O banco tem só um campo de texto livre: junta as condições enviadas pelo app nele
+  const detalhes = [
+    b.condicao_pagamento && `Pagamento: ${b.condicao_pagamento}`,
+    b.prazo_entrega && `Prazo de entrega: ${b.prazo_entrega}`,
+    b.local_entrega && `Local de entrega: ${b.local_entrega}`,
+    b.observacoes || b.mensagem,
+  ].filter(Boolean);
+  const mensagem = detalhes.length ? detalhes.join('\n') : null;
 
   if (!cafe_id || !valor_proposto || !quantidade_sacas) {
-    return res.status(400).json({ error: 'cafe_id, valor_proposto e quantidade_sacas são obrigatórios' });
+    return res.status(400).json({ error: 'Lote, valor e quantidade de sacas são obrigatórios' });
   }
 
   try {
@@ -39,29 +52,33 @@ router.post('/', authMiddleware, async (req, res) => {
 
     if (!cafe) return res.status(404).json({ error: 'Lote não encontrado' });
     if (cafe.status !== 'ativo') return res.status(400).json({ error: 'Lote não está ativo' });
-    if (cafe.usuario_id === req.usuario.id) return res.status(400).json({ error: 'Não pode fazer proposta no próprio lote' });
+    if (cafe.usuario_id === req.usuario.id) {
+      return res.status(400).json({
+        error: 'Contraproposta ainda não é suportada. Recuse a proposta e combine os novos termos por mensagem.',
+      });
+    }
 
     const { data, error } = await supabase
       .from('propostas')
       .insert({
         cafe_id, comprador_id: req.usuario.id,
         produtor_id: cafe.usuario_id,
-        valor_proposto, quantidade_sacas, mensagem
+        valor_proposto, quantidade_sacas, mensagem,
       })
       .select()
       .single();
 
     if (error) throw error;
-    res.status(201).json(data);
+    res.status(201).json(propostaParaApp(data));
   } catch (err) {
     console.error('Erro ao criar proposta:', err);
     res.status(500).json({ error: 'Erro ao enviar proposta' });
   }
 });
 
-// PUT /propostas/:id/status — aceitar/recusar
-router.put('/:id/status', authMiddleware, async (req, res) => {
-  const { status } = req.body;
+// PUT/PATCH /propostas/:id/status — aceitar/recusar/cancelar
+async function atualizarStatus(req, res) {
+  const status = statusPropostaParaDb(req.body.status);
   if (!['aceita', 'recusada', 'cancelada'].includes(status)) {
     return res.status(400).json({ error: 'Status inválido' });
   }
@@ -82,16 +99,19 @@ router.put('/:id/status', authMiddleware, async (req, res) => {
 
     const { data, error } = await supabase
       .from('propostas')
-      .update({ status })
+      .update({ status, atualizado_em: new Date().toISOString() })
       .eq('id', req.params.id)
       .select()
       .single();
 
     if (error) throw error;
-    res.json(data);
+    res.json(propostaParaApp(data));
   } catch (err) {
     res.status(500).json({ error: 'Erro ao atualizar proposta' });
   }
-});
+}
+
+router.put('/:id/status', authMiddleware, atualizarStatus);
+router.patch('/:id/status', authMiddleware, atualizarStatus);
 
 module.exports = router;
