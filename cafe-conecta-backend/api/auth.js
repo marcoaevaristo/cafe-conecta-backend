@@ -5,6 +5,8 @@ const crypto = require('crypto');
 const supabase = require('../lib/supabase');
 const { authMiddleware, JWT_SECRET } = require('../middleware/auth');
 
+const { planoEfetivo } = require('../lib/planos');
+
 const router = express.Router();
 
 // POST /auth/cadastro
@@ -100,7 +102,8 @@ router.get('/me', authMiddleware, async (req, res) => {
 
     if (error || !usuario) return res.status(404).json({ error: 'Usuário não encontrado' });
 
-    res.json(usuario);
+    // Plano pago vencido volta a valer como gratuito; o plano contratado segue em plano_contratado
+    res.json({ ...usuario, plano: planoEfetivo(usuario), plano_contratado: usuario.plano });
   } catch (err) {
     res.status(500).json({ error: 'Erro ao buscar perfil' });
   }

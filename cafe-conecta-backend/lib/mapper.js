@@ -17,20 +17,31 @@ function mensagemParaApp(m) {
 
 // Status do banco -> status do app
 const STATUS_PROPOSTA_APP = { pendente: 'aguardando' };
-// Status do app -> status do banco (contraproposta encerra a original como recusada)
-const STATUS_PROPOSTA_DB = { aguardando: 'pendente', contraproposta: 'recusada' };
+// Status do app -> status do banco
+const STATUS_PROPOSTA_DB = { aguardando: 'pendente' };
+
+// Quem fez a proposta: autor_id (contrapropostas) ou, por padrão, o comprador.
+function autorDaProposta(p) {
+  return p.autor_id || p.comprador_id;
+}
+// Quem recebe e decide (aceitar/recusar/contrapropor): a outra parte.
+function destinatarioDaProposta(p) {
+  return autorDaProposta(p) === p.comprador_id ? p.produtor_id : p.comprador_id;
+}
 
 function propostaParaApp(p) {
   if (!p) return p;
+  const autorEhComprador = autorDaProposta(p) === p.comprador_id;
+  const autor = autorEhComprador ? p.comprador : p.produtor;
   return {
     ...p,
-    de_usuario_id: p.comprador_id,
-    para_usuario_id: p.produtor_id,
+    de_usuario_id: autorDaProposta(p),
+    para_usuario_id: destinatarioDaProposta(p),
     preco_ofertado: p.valor_proposto != null ? Number(p.valor_proposto) : null,
     observacoes: p.mensagem ?? null,
     status_app: STATUS_PROPOSTA_APP[p.status] ?? p.status,
-    remetente_nome: p.comprador?.nome ?? null,
-    remetente_empresa: p.comprador?.empresa ?? null,
+    remetente_nome: autor?.nome ?? null,
+    remetente_empresa: autor?.empresa ?? null,
   };
 }
 
@@ -52,6 +63,8 @@ function avaliacaoParaApp(a) {
 module.exports = {
   mensagemParaApp,
   propostaParaApp,
+  autorDaProposta,
+  destinatarioDaProposta,
   statusPropostaParaDb,
   avaliacaoParaApp,
 };

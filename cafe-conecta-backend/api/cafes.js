@@ -1,6 +1,7 @@
 const express = require('express');
 const supabase = require('../lib/supabase');
 const { authMiddleware } = require('../middleware/auth');
+const { exigirLimite } = require('../lib/planos');
 
 const router = express.Router();
 
@@ -70,6 +71,8 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 
   try {
+    if ((status ?? 'ativo') === 'ativo' && !(await exigirLimite(req, res, 'lotes_ativos'))) return;
+
     const { data, error } = await supabase
       .from('cafes')
       .insert({
@@ -103,11 +106,13 @@ router.post('/', authMiddleware, async (req, res) => {
 router.put('/:id', authMiddleware, async (req, res) => {
   try {
     const { data: cafe } = await supabase
-      .from('cafes').select('usuario_id').eq('id', req.params.id).single();
+      .from('cafes').select('usuario_id, status').eq('id', req.params.id).single();
 
     if (!cafe || cafe.usuario_id !== req.usuario.id) {
       return res.status(403).json({ error: 'Sem permissão' });
     }
+    if (req.body.status === 'ativo' && cafe.status !== 'ativo'
+        && !(await exigirLimite(req, res, 'lotes_ativos'))) return;
 
     const { tipo, classificacao, quantidade_sacas, preco_saca, cidade, estado, regiao, fazenda, score, descricao, status, bebida, peneira, safra, lat, lng } = req.body;
 
@@ -133,11 +138,13 @@ router.patch('/:id/status', authMiddleware, async (req, res) => {
   }
   try {
     const { data: cafe } = await supabase
-      .from('cafes').select('usuario_id').eq('id', req.params.id).single();
+      .from('cafes').select('usuario_id, status').eq('id', req.params.id).single();
 
     if (!cafe || cafe.usuario_id !== req.usuario.id) {
       return res.status(403).json({ error: 'Sem permissão' });
     }
+    if (status === 'ativo' && cafe.status !== 'ativo'
+        && !(await exigirLimite(req, res, 'lotes_ativos'))) return;
 
     const { data, error } = await supabase
       .from('cafes')

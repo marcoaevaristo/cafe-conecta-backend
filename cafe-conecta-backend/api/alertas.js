@@ -1,6 +1,7 @@
 const express = require('express');
 const supabase = require('../lib/supabase');
 const { authMiddleware } = require('../middleware/auth');
+const { exigirLimite } = require('../lib/planos');
 
 const router = express.Router();
 
@@ -24,6 +25,7 @@ router.get('/', authMiddleware, async (req, res) => {
 router.post('/', authMiddleware, async (req, res) => {
   const { tipo_cafe, classificacao, regiao, preco_maximo, score_minimo } = req.body;
   try {
+    if (!(await exigirLimite(req, res, 'alertas'))) return;
     const { data, error } = await supabase
       .from('alertas')
       .insert({ usuario_id: req.usuario.id, tipo_cafe, classificacao, regiao, preco_maximo, score_minimo })
