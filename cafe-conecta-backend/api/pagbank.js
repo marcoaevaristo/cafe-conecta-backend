@@ -5,7 +5,9 @@
 
 const express = require('express');
 const router  = express.Router();
-const { createClient } = require('@supabase/supabase-js');
+const { authMiddleware } = require('../middleware/auth');
+const { sincronizarPedido } = require('../lib/assinaturas');
+const supabaseLib = require('../lib/supabase');
 
 const PAGBANK_TOKEN = process.env.PAGBANK_TOKEN;
 const PAGBANK_ENV   = process.env.PAGBANK_ENV || 'sandbox';
@@ -13,10 +15,7 @@ const PAGBANK_URL   = PAGBANK_ENV === 'sandbox'
   ? 'https://sandbox.api.pagseguro.com'
   : 'https://api.pagseguro.com';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+const supabase = supabaseLib;
 
 // Planos disponíveis
 const PLANOS = {
@@ -48,13 +47,14 @@ async function pagbankRequest(method, path, body = null) {
 }
 
 // ── POST /pagbank/criar-assinatura ──────────────────────────
-// Body: { user_id, plano, metodo: 'pix' | 'cartao', cartao? }
-router.post('/criar-assinatura', async (req, res) => {
+// Body: { plano, metodo: 'pix' | 'cartao', cpf, nome?, cartao? } — usuário vem do login
+router.post('/criar-assinatura', authMiddleware, async (req, res) => {
   try {
-    const { user_id, plano, metodo, cartao } = req.body;
+    const user_id = req.usuario.id;
+    const { plano, metodo, cartao } = req.body;
 
-    if (!user_id || !plano || !metodo) {
-      return res.status(400).json({ error: 'user_id, plano e metodo são obrigatórios' });
+    if (!plano || !metodo) {
+      return res.status(400).json({ error: 'plano e metodo são obrigatórios' });
     }
 
     const planoInfo = PLANOS[plano];
@@ -67,7 +67,7 @@ router.post('/criar-assinatura', async (req, res) => {
       reference_id: `cafe-conecta-${user_id}-${Date.now()}`,
       customer: {
         name:  req.body.nome  || 'Usuário Café Conecta',
-        email: req.body.email || 'usuario@cafeconecta.com.br',
+        email: req.usuario.email || req.body.email || 'usuario@cafeconecta.com.br',
         tax_id: req.body.cpf  || '00000000000', // CPF sem pontuação
       },
       items: [
@@ -145,6 +145,11 @@ router.post('/criar-assinatura', async (req, res) => {
 
     if (dbError) throw dbError;
 
+    let liberacao = null;
+    if (ordem.charges?.some((c) => c.status === 'PAID')) {
+      liberacao = await sincronizarPedido(ordem.id, ordem);
+    }
+
     return res.json({
       sucesso:       true,
       assinatura_id: assinatura.id,
@@ -157,6 +162,8 @@ router.post('/criar-assinatura', async (req, res) => {
       pix_expira:  pixExpira,
       // Para cartão: status já vem no charge
       charge_status: ordem.charges?.[0]?.status || null,
+      plano_liberado: liberacao?.situacao === 'pago',
+      valido_ate: liberacao?.valido_ate || null,
     });
 
   } catch (err) {
@@ -166,52 +173,48 @@ router.post('/criar-assinatura', async (req, res) => {
 });
 
 // ── POST /pagbank/webhook ───────────────────────────────────
-// PagBank notifica aqui quando o pagamento é confirmado
+// PagBank avisa aqui quando o pedido muda. O corpo NÃO é confiável:
+// o status é sempre confirmado consultando o pedido direto no PagBank.
 router.post('/webhook', async (req, res) => {
+  const orderId = req.body?.id;
+  if (!orderId || !String(orderId).startsWith('ORDE_')) return res.sendStatus(200);
   try {
-    const { id: orderId, charges, qr_codes } = req.body;
-
-    if (!orderId) return res.sendStatus(200);
-
-    // Verifica se algum pagamento foi aprovado
-    const aprovado =
-      charges?.some(c => c.status === 'PAID') ||
-      qr_codes?.some(q => q.status === 'PAID');
-
-    if (aprovado) {
-      const agora = new Date();
-      const proximo = new Date(agora);
-      proximo.setMonth(proximo.getMonth() + 1);
-
-      await supabase
-        .from('assinaturas')
-        .update({
-          status:            'ativa',
-          valido_ate:        proximo.toISOString(), // ← era proximo_vencimento, correto: valido_ate
-          pagbank_charge_id: charges?.[0]?.id || null,
-          // ativado_em, cartao_ultimos4, cartao_bandeira não existem na tabela — omitidos
-        })
-        .eq('pagbank_order_id', orderId);
-    }
-
+    const r = await sincronizarPedido(orderId);
+    console.log('[webhook]', orderId, r.situacao);
     return res.sendStatus(200);
   } catch (err) {
     console.error('[webhook]', err.message);
-    return res.sendStatus(500);
+    return res.sendStatus(500); // PagBank tenta de novo depois
   }
 });
 
-// ── GET /pagbank/status/:user_id ────────────────────────────
-// Flutter consulta para saber o plano ativo do usuário
-router.get('/status/:user_id', async (req, res) => {
+// ── GET /pagbank/verificar/:orderId ─────────────────────────
+// App pergunta "já foi pago?" depois do PIX (não depende do webhook chegar)
+router.get('/verificar/:orderId', authMiddleware, async (req, res) => {
   try {
-    const { user_id } = req.params;
+    const { data: assinatura } = await supabase
+      .from('assinaturas').select('usuario_id').eq('pagbank_order_id', req.params.orderId).maybeSingle();
+    if (!assinatura || assinatura.usuario_id !== req.usuario.id) {
+      return res.status(404).json({ error: 'Pedido não encontrado' });
+    }
+    return res.json(await sincronizarPedido(req.params.orderId));
+  } catch (err) {
+    console.error('[verificar]', err.message);
+    return res.status(502).json({ error: 'Não foi possível confirmar o pagamento agora. Tente de novo em instantes.' });
+  }
+});
+
+// ── GET /pagbank/status ─────────────────────────────────────
+// Assinatura mais recente do usuário logado
+router.get(['/status', '/status/:user_id'], authMiddleware, async (req, res) => {
+  try {
+    const user_id = req.usuario.id;
 
     const { data, error } = await supabase
       .from('assinaturas')
       .select('plano, status, valor, metodo_pagamento, valido_ate') // ← valor e valido_ate corretos
       .eq('usuario_id', user_id)                                    // ← era user_id, correto: usuario_id
-      .in('status', ['ativa', 'pendente', 'trial'])
+      .in('status', ['ativo', 'pendente'])
       .order('criado_em', { ascending: false })
       .limit(1)
       .single();
@@ -230,15 +233,15 @@ router.get('/status/:user_id', async (req, res) => {
 });
 
 // ── POST /pagbank/cancelar ──────────────────────────────────
-router.post('/cancelar', async (req, res) => {
+// Cancela a renovação: o plano continua valendo até plano_valido_ate (não há cobrança automática)
+router.post('/cancelar', authMiddleware, async (req, res) => {
   try {
-    const { user_id } = req.body;
-
-    await supabase
+    const { error } = await supabase
       .from('assinaturas')
-      .update({ status: 'cancelada' })  // ← cancelado_em não existe na tabela — removido
-      .eq('usuario_id', user_id)        // ← era user_id, correto: usuario_id
-      .eq('status', 'ativa');
+      .update({ status: 'cancelado' })
+      .eq('usuario_id', req.usuario.id)
+      .in('status', ['ativo', 'pendente']);
+    if (error) throw error;
 
     return res.json({ sucesso: true });
   } catch (err) {

@@ -1,6 +1,14 @@
 const express = require('express');
 const supabase = require('../lib/supabase');
-const { authMiddleware } = require('../middleware/auth');
+const jwt = require('jsonwebtoken');
+const { authMiddleware, JWT_SECRET } = require('../middleware/auth');
+
+// Login opcional: rotas públicas mostram o telefone do anunciante só para quem está logado
+function usuarioLogado(req) {
+  const token = (req.headers.authorization || '').split(' ')[1];
+  if (!token) return null;
+  try { return jwt.verify(token, JWT_SECRET); } catch { return null; }
+}
 const { exigirLimite, planoDoUsuario, planoEfetivo, avaliarLimite } = require('../lib/planos');
 const { lerImagemBase64 } = require('../lib/imagem');
 
@@ -9,10 +17,11 @@ const MSG_MIGRACAO_FOTOS = 'Fotos indisponíveis: falta aplicar a atualização 
 
 // Lotes de quem tem plano Premium aparecem em destaque (benefício "Destaque na busca").
 // Também respeita o campo destaque marcado manualmente no banco.
-function marcarDestaque(cafe) {
+function marcarDestaque(cafe, mostrarTelefone = false) {
   const dono = cafe.usuario || {};
   const destaque = cafe.destaque === true || planoEfetivo(dono) === 'premium';
   const { plano, plano_valido_ate, ...usuarioPublico } = dono;
+  if (!mostrarTelefone) delete usuarioPublico.telefone;
   return { ...cafe, destaque, usuario: cafe.usuario ? usuarioPublico : cafe.usuario };
 }
 
@@ -25,7 +34,7 @@ router.get('/', async (req, res) => {
   try {
     let query = supabase
       .from('cafes')
-      .select(`*, usuario:usuarios(id, nome, cidade, estado, verificado, avatar_url, plano, plano_valido_ate)`)
+      .select(`*, usuario:usuarios(id, nome, cidade, estado, verificado, avatar_url, telefone, plano, plano_valido_ate)`)
       .order('criado_em', { ascending: false });
 
     if (usuario_id) {
@@ -45,7 +54,8 @@ router.get('/', async (req, res) => {
     if (error) throw error;
 
     // Destaques primeiro; dentro de cada grupo, mantém a ordem (mais recentes antes)
-    const lista = (data || []).map(marcarDestaque);
+    const logado = Boolean(usuarioLogado(req));
+    const lista = (data || []).map((c) => marcarDestaque(c, logado));
     lista.sort((a, b) => Number(b.destaque) - Number(a.destaque));
     res.json(lista);
   } catch (err) {

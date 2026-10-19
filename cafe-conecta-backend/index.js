@@ -34,7 +34,6 @@ app.use('/planos', planosRoutes);
 app.use('/avaliacoes', require('./api/avaliacoes'));
 app.use('/ia', require('./api/ia').iaRouter);
 app.use('/laudos', require('./api/ia').laudosRouter);
-app.use('/debug', require('./api/debug'));
 app.use('/webhook', webhookRoutes);
 app.use('/dashboard', dashboardRoutes);
 app.use('/', dashboardRoutes); // expõe /historico-precos na raiz
