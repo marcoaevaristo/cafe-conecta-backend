@@ -28,7 +28,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 });
 
 async function criarMaster() {
-  const email = process.env.MASTER_EMAIL || 'master@cafeconecta.com.br';
+  const email = process.env.MASTER_EMAIL || 'cafeconecta5@gmail.com';
   const senha = process.env.MASTER_SENHA || 'Master@2024!';
   const nome  = process.env.MASTER_NOME  || 'Administrador Master';
 

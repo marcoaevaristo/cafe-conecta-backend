@@ -11,7 +11,7 @@ const PRECO = { basico: 29, profissional: 79, premium: 149 };
 const FUSO = 'America/Sao_Paulo';
 
 function emailsAdmin() {
-  return (process.env.ADMIN_EMAILS || 'master@cafeconecta.com.br')
+  return (process.env.ADMIN_EMAILS || 'cafeconecta5@gmail.com')
     .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
 }
 function ehAdmin(email) {
