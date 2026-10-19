@@ -32,6 +32,8 @@ app.use('/favoritos', favoritosRoutes);
 app.use('/mensagens', mensagensRoutes);
 app.use('/planos', planosRoutes);
 app.use('/avaliacoes', require('./api/avaliacoes'));
+app.use('/metricas', require('./api/metricas').router);
+app.use('/admin', require('./api/admin').router);
 app.use('/ia', require('./api/ia').iaRouter);
 app.use('/laudos', require('./api/ia').laudosRouter);
 app.use('/webhook', webhookRoutes);
