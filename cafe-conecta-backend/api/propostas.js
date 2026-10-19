@@ -100,6 +100,10 @@ router.post('/', authMiddleware, async (req, res) => {
     }
 
     // ── Proposta nova (comprador → dono do lote) ─────────────
+    // Produtor só vende: pode responder/contrapropor nos próprios lotes, mas não comprar
+    if (req.usuario.tipo === 'produtor') {
+      return res.status(403).json({ error: 'Contas de produtor anunciam e vendem, mas não fazem propostas de compra.' });
+    }
     const { cafe_id, quantidade_sacas } = b;
     if (!cafe_id || !valor_proposto || !quantidade_sacas) {
       return res.status(400).json({ error: 'Lote, valor e quantidade de sacas são obrigatórios' });
