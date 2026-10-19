@@ -108,9 +108,20 @@ iaRouter.post('/laudo', authMiddleware, async (req, res) => {
 
     res.status(201).json({ id: laudo.id, criado_em: laudo.criado_em, url: urlPublica(req, laudo.id), ...resultado });
   } catch (err) {
-    const detalhe = err.response?.data?.error?.message || err.message;
-    console.error('Erro na classificação por IA:', detalhe);
-    res.status(502).json({ error: 'Não foi possível analisar a imagem agora. Tente novamente em instantes.' });
+    const status = err.response?.status;
+    const detalhe = err.response?.data?.error?.message || err.message || '';
+    console.error('Erro na classificação por IA:', status, detalhe);
+
+    // Mensagens que ajudam a resolver a configuração, sem expor a chave
+    let motivo = 'Não foi possível analisar a imagem agora. Tente novamente em instantes.';
+    if (status === 401) motivo = 'A chave da IA (ANTHROPIC_API_KEY) foi recusada. Confira se foi colada inteira no Vercel.';
+    else if (status === 403) motivo = 'A chave da IA não tem permissão para este uso. Confira a chave no Console da Anthropic.';
+    else if (/credit balance/i.test(detalhe)) motivo = 'A conta da IA está sem créditos. Adicione créditos em console.anthropic.com → Billing.';
+    else if (status === 404 || /model/i.test(detalhe)) motivo = `O modelo de IA "${MODELO}" não está disponível para esta chave.`;
+    else if (status === 429) motivo = 'Muitas análises seguidas. Aguarde um minuto e tente de novo.';
+    else if (err instanceof SyntaxError || /JSON/.test(detalhe)) motivo = 'A IA respondeu num formato inesperado. Tente de novo com outra foto.';
+
+    res.status(502).json({ error: motivo, status_ia: status ?? null });
   }
 });
 
