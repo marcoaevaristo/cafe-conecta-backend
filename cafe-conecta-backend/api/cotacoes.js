@@ -7,6 +7,7 @@
 
 const express = require('express');
 const https = require('https');
+const { calcularIndice } = require('../lib/indice');
 const router = express.Router();
 
 const FONTES_CAFE = [
@@ -71,6 +72,17 @@ router.get('/atual', async (req, res) => {
   } catch (err) {
     console.error('Erro cotacoes/atual:', err);
     res.status(500).json({ error: 'Erro ao buscar cotações' });
+  }
+});
+
+// GET /api/cotacoes/indice — Índice Café Conecta (preços reais dos lotes do app)
+router.get('/indice', async (req, res) => {
+  try {
+    res.set('Cache-Control', 'public, max-age=30');
+    res.json(await calcularIndice());
+  } catch (err) {
+    console.error('Erro cotacoes/indice:', err);
+    res.status(500).json({ error: 'Erro ao calcular o índice' });
   }
 });
 

@@ -1,46 +1,15 @@
 const express = require('express');
 const supabase = require('../lib/supabase');
 const { authMiddleware } = require('../middleware/auth');
+const { historicoMensal } = require('../lib/indice');
 
 const router = express.Router();
 
-// GET /historico-precos — histórico mock de preços para o gráfico do dashboard
-// Retorna dados dos últimos 6 meses para regiões cafeeiras brasileiras
+// GET /historico-precos — média mensal real do preço pedido nos lotes do app
+// (últimos 6 meses, por tipo e região). Sem lotes no mês = sem ponto.
 router.get('/historico-precos', async (req, res) => {
   try {
-    const regioes = [
-      { regiao: 'Sul de Minas', base: 1420 },
-      { regiao: 'Cerrado', base: 1380 },
-      { regiao: 'Mogiana', base: 1395 },
-    ];
-    const tipos = [
-      { tipo: 'arabica', label: 'Arábica' },
-    ];
-    const resultado = [];
-    const hoje = new Date();
-
-    for (const tipo of tipos) {
-      for (const r of regioes) {
-        for (let m = 5; m >= 0; m--) {
-          const d = new Date(hoje.getFullYear(), hoje.getMonth() - m, 1);
-          const mes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-          // Variação determinística baseada no mês para consistência
-          const seed = d.getMonth() + d.getFullYear() * 12;
-          const variacao = ((seed % 9) - 4) * 15; // -60 a +60 por mês
-          const tendencia = (5 - m) * 18; // tendência de alta nos últimos meses
-          const preco = Math.round((r.base + variacao + tendencia) * 100) / 100;
-          resultado.push({
-            id: null,
-            tipo_cafe: tipo.label,
-            regiao: r.regiao,
-            preco_medio: preco,
-            mes,
-          });
-        }
-      }
-    }
-
-    res.json(resultado);
+    res.json(await historicoMensal());
   } catch (err) {
     console.error('Erro historico-precos:', err);
     res.status(500).json({ error: 'Erro ao buscar histórico de preços' });
