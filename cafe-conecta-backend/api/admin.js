@@ -128,6 +128,9 @@ router.get('/resumo', authMiddleware, exigirAdmin, async (req, res) => {
         mrr: pagantesReais.reduce((s, u) => s + (PRECO[u.efetivo] || 0), 0),
         pagantes: pagantesReais.length,
         cortesias: cortesias.length,
+        lista_cortesias: cortesias
+          .map((u) => ({ id: u.id, nome: u.nome, email: u.email, plano: u.efetivo, valido_ate: u.plano_valido_ate }))
+          .sort((a, b) => String(a.valido_ate || '9999').localeCompare(String(b.valido_ate || '9999'))),
         recebido_30d: receitaPeriodo(30),
         recebido_total: pagas.reduce((s, a) => s + Number(a.valor || 0), 0),
         assinaturas_por_status: contar(assinaturas, (a) => a.status),
@@ -156,6 +159,62 @@ router.get('/resumo', authMiddleware, exigirAdmin, async (req, res) => {
   } catch (err) {
     console.error('[admin/resumo]', err.message);
     res.status(500).json({ error: 'Erro ao montar o painel' });
+  }
+});
+
+// ── Liberação de plano sem pagamento (cortesia) ─────────────────────
+
+// GET /admin/usuarios?busca=texto — procura por nome ou e-mail (até 20)
+router.get('/usuarios', authMiddleware, exigirAdmin, async (req, res) => {
+  // remove caracteres que o filtro do Supabase usa como sintaxe
+  const busca = String(req.query.busca || '').replace(/[,()%*\\]/g, ' ').trim();
+  try {
+    let q = supabase.from('usuarios')
+      .select('id, nome, email, tipo, plano, plano_valido_ate, criado_em')
+      .order('nome', { ascending: true })
+      .limit(20);
+    if (busca) q = q.or(`nome.ilike.*${busca}*,email.ilike.*${busca}*`);
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json((data || []).map((u) => ({ ...u, plano_efetivo: planoEfetivo(u) })));
+  } catch (err) {
+    console.error('[admin/usuarios]', err.message);
+    res.status(500).json({ error: 'Erro ao buscar usuários' });
+  }
+});
+
+// POST /admin/usuarios/:id/plano — Body: { plano, valido_ate: 'AAAA-MM-DD' }
+// Libera o plano até o fim do dia informado (horário de Brasília). plano 'gratuito' remove a liberação.
+router.post('/usuarios/:id/plano', authMiddleware, exigirAdmin, async (req, res) => {
+  const { plano, valido_ate } = req.body || {};
+  if (!['gratuito', 'basico', 'profissional', 'premium'].includes(plano)) {
+    return res.status(400).json({ error: 'Plano inválido' });
+  }
+
+  let validade = null;
+  if (plano !== 'gratuito') {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(valido_ate || ''))) {
+      return res.status(400).json({ error: 'Informe a data final no formato AAAA-MM-DD' });
+    }
+    validade = new Date(`${valido_ate}T23:59:59-03:00`); // fim do dia em Brasília
+    if (Number.isNaN(validade.getTime())) return res.status(400).json({ error: 'Data inválida' });
+    if (validade.getTime() <= Date.now()) return res.status(400).json({ error: 'A data final precisa ser no futuro' });
+  }
+
+  try {
+    const { data, error } = await supabase.from('usuarios')
+      .update({ plano, plano_valido_ate: validade ? validade.toISOString() : null })
+      .eq('id', req.params.id)
+      .select('id, nome, email, tipo, plano, plano_valido_ate')
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'Usuário não encontrado' });
+
+    console.log(`[admin] ${req.usuario.email} definiu plano ${plano} até ${validade ? validade.toISOString() : '—'} para ${data.email}`);
+    res.json({ ...data, plano_efetivo: planoEfetivo(data) });
+  } catch (err) {
+    console.error('[admin/plano]', err.message);
+    res.status(500).json({ error: 'Erro ao alterar o plano' });
   }
 });
 
