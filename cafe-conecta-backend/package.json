@@ -1,7 +1,7 @@
 {
   "name": "cafe-conecta-backend",
   "version": "1.0.0",
-  "description": "API backend do Café Conecta",
+  "description": "API backend do Caf\u00e9 Conecta",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -13,7 +13,8 @@
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
-    "axios": "^1.6.0"
+    "axios": "^1.6.0",
+    "nodemailer": "^6.9.14"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

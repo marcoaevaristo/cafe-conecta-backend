@@ -6,6 +6,7 @@ const supabase = require('../lib/supabase');
 const { authMiddleware, JWT_SECRET } = require('../middleware/auth');
 
 const { planoEfetivo } = require('../lib/planos');
+const { emailConfigurado, enviarCodigoRecuperacao } = require('../lib/email');
 
 const router = express.Router();
 
@@ -127,68 +128,77 @@ router.put('/perfil', authMiddleware, async (req, res) => {
   }
 });
 
-// POST /auth/esqueci-senha
-// Body: { email }
-// Gera um token de 6 dígitos válido por 15 minutos e retorna no JSON
-// (Em produção, enviar por e-mail. Aqui retornamos o token para facilitar os testes.)
+// ── Recuperação de senha ────────────────────────────────────────────
+// O código de 6 dígitos vai SÓ por e-mail. No banco fica o hash do código
+// e o número de tentativas, no formato "tentativas|hash" (coluna reset_token).
+const MAX_TENTATIVAS = 5;
+const VALIDADE_MIN = 15;
+const INTERVALO_REENVIO_S = 60;
+const MSG_NEUTRA = 'Se o e-mail estiver cadastrado, você receberá o código em alguns minutos.';
+
+function lerToken(valor) {
+  const [tentativas, hash] = String(valor || '').split('|');
+  return { tentativas: parseInt(tentativas, 10) || 0, hash: hash || null };
+}
+
+// POST /auth/esqueci-senha — Body: { email }
 router.post('/esqueci-senha', async (req, res) => {
-  const { email } = req.body;
+  const email = String(req.body.email || '').trim();
   if (!email) return res.status(400).json({ error: 'E-mail é obrigatório' });
+
+  // Sem e-mail configurado não há como entregar o código com segurança
+  if (!emailConfigurado()) {
+    return res.status(503).json({ error: 'A recuperação de senha está temporariamente indisponível. Tente mais tarde.' });
+  }
 
   try {
     const { data: usuario } = await supabase
       .from('usuarios')
-      .select('id, nome, email')
+      .select('id, nome, email, reset_token_expira')
       .eq('email', email)
       .maybeSingle();
 
-    // Não revelar se o e-mail existe ou não (segurança)
-    if (!usuario) {
-      return res.json({ mensagem: 'Se o e-mail estiver cadastrado, você receberá o código em breve.' });
+    // Mesma resposta exista ou não a conta (não revela quem está cadastrado)
+    if (!usuario) return res.json({ mensagem: MSG_NEUTRA });
+
+    // Evita disparar vários e-mails seguidos para a mesma conta
+    if (usuario.reset_token_expira) {
+      const geradoEm = new Date(usuario.reset_token_expira).getTime() - VALIDADE_MIN * 60 * 1000;
+      if (Date.now() - geradoEm < INTERVALO_REENVIO_S * 1000) return res.json({ mensagem: MSG_NEUTRA });
     }
 
-    // Gera código numérico de 6 dígitos
-    const codigo = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiracao = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 min
+    const codigo = crypto.randomInt(100000, 1000000).toString();
+    const hash = await bcrypt.hash(codigo, 10);
+    const expiracao = new Date(Date.now() + VALIDADE_MIN * 60 * 1000).toISOString();
 
-    // Salva na tabela reset_senha (criamos via SQL abaixo ou usamos coluna temporária)
-    // Usamos a tabela usuarios com colunas extras (adicione via migration):
-    //   reset_token TEXT, reset_token_expira TIMESTAMPTZ
     const { error } = await supabase
       .from('usuarios')
-      .update({ reset_token: codigo, reset_token_expira: expiracao })
+      .update({ reset_token: `0|${hash}`, reset_token_expira: expiracao })
       .eq('id', usuario.id);
-
     if (error) throw error;
 
-    // Em produção: enviar por e-mail (SendGrid, Resend, etc.)
-    // Por enquanto retornamos o código diretamente para testes
-    console.log(`[RESET SENHA] ${email} → código: ${codigo}`);
-
-    res.json({
-      mensagem: 'Código de recuperação gerado com sucesso.',
-      // REMOVA o campo "codigo" abaixo quando integrar com envio de e-mail real:
-      codigo,
-      email: usuario.email,
-    });
+    await enviarCodigoRecuperacao(usuario.email, usuario.nome, codigo);
+    res.json({ mensagem: MSG_NEUTRA });
   } catch (err) {
-    console.error('Erro esqueci-senha:', err);
-    res.status(500).json({ error: 'Erro ao gerar código de recuperação' });
+    console.error('Erro esqueci-senha:', err.message);
+    res.status(500).json({ error: 'Não foi possível enviar o código agora. Tente novamente em instantes.' });
   }
 });
 
-// POST /auth/resetar-senha
-// Body: { email, codigo, nova_senha }
+// POST /auth/resetar-senha — Body: { email, codigo, nova_senha }
 router.post('/resetar-senha', async (req, res) => {
-  const { email, codigo, nova_senha } = req.body;
+  const email = String(req.body.email || '').trim();
+  const codigo = String(req.body.codigo || '').trim();
+  const { nova_senha } = req.body;
 
   if (!email || !codigo || !nova_senha) {
     return res.status(400).json({ error: 'Campos obrigatórios: email, codigo, nova_senha' });
   }
-
   if (nova_senha.length < 6) {
     return res.status(400).json({ error: 'A nova senha deve ter pelo menos 6 caracteres' });
   }
+
+  const invalido = () => res.status(400).json({ error: 'Código inválido ou expirado. Solicite um novo.' });
 
   try {
     const { data: usuario } = await supabase
@@ -197,32 +207,37 @@ router.post('/resetar-senha', async (req, res) => {
       .eq('email', email)
       .maybeSingle();
 
-    if (!usuario) {
-      return res.status(400).json({ error: 'Código inválido ou expirado' });
-    }
+    if (!usuario || !usuario.reset_token) return invalido();
+    if (!usuario.reset_token_expira || new Date(usuario.reset_token_expira) < new Date()) return invalido();
 
-    if (usuario.reset_token !== codigo) {
-      return res.status(400).json({ error: 'Código inválido ou expirado' });
-    }
+    const { tentativas, hash } = lerToken(usuario.reset_token);
+    if (!hash || tentativas >= MAX_TENTATIVAS) return invalido();
 
-    if (!usuario.reset_token_expira || new Date(usuario.reset_token_expira) < new Date()) {
-      return res.status(400).json({ error: 'Código expirado. Solicite um novo.' });
+    if (!(await bcrypt.compare(codigo, hash))) {
+      const restantes = MAX_TENTATIVAS - tentativas - 1;
+      // Na última tentativa errada o código é apagado
+      await supabase.from('usuarios')
+        .update(restantes > 0
+          ? { reset_token: `${tentativas + 1}|${hash}` }
+          : { reset_token: null, reset_token_expira: null })
+        .eq('id', usuario.id);
+      return res.status(400).json({
+        error: restantes > 0
+          ? `Código incorreto. Você ainda tem ${restantes} tentativa${restantes > 1 ? 's' : ''}.`
+          : 'Código incorreto várias vezes. Solicite um novo código.',
+      });
     }
 
     const senhaHash = await bcrypt.hash(nova_senha, 10);
-
-    await supabase
+    const { error } = await supabase
       .from('usuarios')
-      .update({
-        senha_hash: senhaHash,
-        reset_token: null,
-        reset_token_expira: null,
-      })
+      .update({ senha_hash: senhaHash, reset_token: null, reset_token_expira: null })
       .eq('id', usuario.id);
+    if (error) throw error;
 
     res.json({ mensagem: 'Senha alterada com sucesso! Faça login com sua nova senha.' });
   } catch (err) {
-    console.error('Erro resetar-senha:', err);
+    console.error('Erro resetar-senha:', err.message);
     res.status(500).json({ error: 'Erro ao redefinir senha' });
   }
 });
