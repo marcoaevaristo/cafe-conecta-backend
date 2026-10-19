@@ -18,9 +18,18 @@ function ehAdmin(email) {
   return emailsAdmin().includes(String(email || '').toLowerCase());
 }
 
-function exigirAdmin(req, res, next) {
-  if (!ehAdmin(req.usuario?.email)) return res.status(403).json({ error: 'Acesso restrito' });
-  next();
+// Confere o e-mail ATUAL no banco (o do token pode estar desatualizado se o
+// e-mail da conta foi trocado depois do login).
+async function exigirAdmin(req, res, next) {
+  try {
+    const { data } = await supabase
+      .from('usuarios').select('email').eq('id', req.usuario?.id).single();
+    if (!data || !ehAdmin(data.email)) return res.status(403).json({ error: 'Acesso restrito' });
+    next();
+  } catch (err) {
+    console.error('Erro exigirAdmin:', err);
+    res.status(403).json({ error: 'Acesso restrito' });
+  }
 }
 
 const dia = (data) => new Date(data).toLocaleDateString('sv-SE', { timeZone: FUSO });
