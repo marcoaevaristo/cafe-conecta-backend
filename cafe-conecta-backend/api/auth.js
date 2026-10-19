@@ -18,8 +18,8 @@ router.post('/cadastro', async (req, res) => {
     return res.status(400).json({ error: 'Campos obrigatórios: nome, email, senha, tipo' });
   }
 
-  if (!['produtor', 'comprador'].includes(tipo)) {
-    return res.status(400).json({ error: 'Tipo deve ser produtor ou comprador' });
+  if (!['produtor', 'comprador', 'corretor'].includes(tipo)) {
+    return res.status(400).json({ error: 'Tipo deve ser produtor, comprador ou corretor' });
   }
 
   try {
