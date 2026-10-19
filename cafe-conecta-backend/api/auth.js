@@ -113,6 +113,9 @@ router.get('/me', authMiddleware, async (req, res) => {
 // PUT /auth/perfil
 router.put('/perfil', authMiddleware, async (req, res) => {
   const { nome, telefone, cidade, estado } = req.body;
+  if (nome !== undefined && !String(nome).trim()) {
+    return res.status(400).json({ error: 'O nome não pode ficar vazio' });
+  }
   try {
     const { data, error } = await supabase
       .from('usuarios')
@@ -125,6 +128,62 @@ router.put('/perfil', authMiddleware, async (req, res) => {
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Erro ao atualizar perfil' });
+  }
+});
+
+// POST /auth/trocar-senha — Body: { senha_atual, nova_senha }
+router.post('/trocar-senha', authMiddleware, async (req, res) => {
+  const { senha_atual, nova_senha } = req.body;
+  if (!senha_atual || !nova_senha) {
+    return res.status(400).json({ error: 'Informe a senha atual e a nova senha' });
+  }
+  if (String(nova_senha).length < 6) {
+    return res.status(400).json({ error: 'A nova senha deve ter pelo menos 6 caracteres' });
+  }
+  try {
+    const { data: usuario } = await supabase
+      .from('usuarios').select('id, senha_hash').eq('id', req.usuario.id).single();
+    if (!usuario || !(await bcrypt.compare(senha_atual, usuario.senha_hash))) {
+      return res.status(400).json({ error: 'Senha atual incorreta' });
+    }
+    const { error } = await supabase.from('usuarios')
+      .update({ senha_hash: await bcrypt.hash(nova_senha, 10), reset_token: null, reset_token_expira: null })
+      .eq('id', usuario.id);
+    if (error) throw error;
+    res.json({ mensagem: 'Senha alterada com sucesso' });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao trocar a senha' });
+  }
+});
+
+// DELETE /auth/conta — Body: { senha }. Exclui a conta e os dados ligados a ela (LGPD).
+router.delete('/conta', authMiddleware, async (req, res) => {
+  const { senha } = req.body || {};
+  if (!senha) return res.status(400).json({ error: 'Confirme com a sua senha' });
+  try {
+    const { data: usuario } = await supabase
+      .from('usuarios').select('id, senha_hash').eq('id', req.usuario.id).single();
+    if (!usuario || !(await bcrypt.compare(senha, usuario.senha_hash))) {
+      return res.status(400).json({ error: 'Senha incorreta' });
+    }
+
+    // Apaga as fotos dos lotes no Storage (o banco não faz isso sozinho)
+    const { data: cafes } = await supabase.from('cafes').select('id').eq('usuario_id', usuario.id);
+    for (const cafe of cafes || []) {
+      const { data: arquivos } = await supabase.storage.from('cafe-fotos').list(cafe.id);
+      if (arquivos?.length) {
+        await supabase.storage.from('cafe-fotos').remove(arquivos.map((a) => `${cafe.id}/${a.name}`));
+      }
+    }
+
+    const { error } = await supabase.from('usuarios').delete().eq('id', usuario.id);
+    if (error) {
+      console.error('Erro ao excluir conta:', error);
+      return res.status(409).json({ error: 'Não foi possível excluir a conta agora. Tente novamente mais tarde.' });
+    }
+    res.json({ mensagem: 'Conta excluída' });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao excluir a conta' });
   }
 });
 
