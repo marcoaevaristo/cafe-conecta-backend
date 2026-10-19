@@ -1,7 +1,20 @@
 const express = require('express');
 const supabase = require('../lib/supabase');
 const { authMiddleware } = require('../middleware/auth');
-const { exigirLimite } = require('../lib/planos');
+const { exigirLimite, planoDoUsuario, planoEfetivo, avaliarLimite } = require('../lib/planos');
+const { lerImagemBase64 } = require('../lib/imagem');
+
+const BUCKET_FOTOS = 'cafe-fotos';
+const MSG_MIGRACAO_FOTOS = 'Fotos indisponíveis: falta aplicar a atualização do banco (migration_fotos_laudos.sql).';
+
+// Lotes de quem tem plano Premium aparecem em destaque (benefício "Destaque na busca").
+// Também respeita o campo destaque marcado manualmente no banco.
+function marcarDestaque(cafe) {
+  const dono = cafe.usuario || {};
+  const destaque = cafe.destaque === true || planoEfetivo(dono) === 'premium';
+  const { plano, plano_valido_ate, ...usuarioPublico } = dono;
+  return { ...cafe, destaque, usuario: cafe.usuario ? usuarioPublico : cafe.usuario };
+}
 
 const router = express.Router();
 
@@ -12,7 +25,7 @@ router.get('/', async (req, res) => {
   try {
     let query = supabase
       .from('cafes')
-      .select(`*, usuario:usuarios(id, nome, cidade, estado, verificado, avatar_url)`)
+      .select(`*, usuario:usuarios(id, nome, cidade, estado, verificado, avatar_url, plano, plano_valido_ate)`)
       .order('criado_em', { ascending: false });
 
     if (usuario_id) {
@@ -31,7 +44,10 @@ router.get('/', async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
 
-    res.json(data);
+    // Destaques primeiro; dentro de cada grupo, mantém a ordem (mais recentes antes)
+    const lista = (data || []).map(marcarDestaque);
+    lista.sort((a, b) => Number(b.destaque) - Number(a.destaque));
+    res.json(lista);
   } catch (err) {
     console.error('Erro ao listar cafés:', err);
     res.status(500).json({ error: 'Erro ao buscar lotes' });
@@ -157,6 +173,75 @@ router.patch('/:id/status', authMiddleware, async (req, res) => {
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Erro ao atualizar status do lote' });
+  }
+});
+
+// POST /cafes/:id/fotos — adiciona uma foto ao lote. Body: { imagem: base64, content_type }
+router.post('/:id/fotos', authMiddleware, async (req, res) => {
+  try {
+    const { data: cafe, error: errCafe } = await supabase
+      .from('cafes').select('*').eq('id', req.params.id).single();
+    if (errCafe || !cafe) return res.status(404).json({ error: 'Lote não encontrado' });
+    if (cafe.usuario_id !== req.usuario.id) return res.status(403).json({ error: 'Sem permissão' });
+    if (!('fotos' in cafe)) return res.status(503).json({ error: MSG_MIGRACAO_FOTOS });
+
+    const fotos = cafe.fotos || [];
+    const plano = await planoDoUsuario(req.usuario.id);
+    const limite = avaliarLimite(plano, 'fotos_por_lote', fotos.length);
+    if (!limite.permitido) return res.status(403).json(limite.resposta);
+
+    const img = lerImagemBase64(req.body.imagem, req.body.content_type);
+    if (img.erro) return res.status(400).json({ error: img.erro });
+
+    const caminho = `${cafe.id}/${Date.now()}.${img.extensao}`;
+    const { error: errUpload } = await supabase.storage
+      .from(BUCKET_FOTOS).upload(caminho, img.buffer, { contentType: img.tipo, upsert: false });
+    if (errUpload) {
+      console.error('Erro no upload da foto:', errUpload);
+      return res.status(503).json({ error: MSG_MIGRACAO_FOTOS });
+    }
+    const { data: pub } = supabase.storage.from(BUCKET_FOTOS).getPublicUrl(caminho);
+
+    const novasFotos = [...fotos, pub.publicUrl];
+    const { data, error } = await supabase
+      .from('cafes')
+      .update({ fotos: novasFotos, imagem_url: cafe.imagem_url || pub.publicUrl })
+      .eq('id', cafe.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) {
+    console.error('Erro ao adicionar foto:', err);
+    res.status(500).json({ error: 'Erro ao adicionar foto' });
+  }
+});
+
+// DELETE /cafes/:id/fotos — remove uma foto. Body: { url }
+router.delete('/:id/fotos', authMiddleware, async (req, res) => {
+  try {
+    const { data: cafe } = await supabase
+      .from('cafes').select('*').eq('id', req.params.id).single();
+    if (!cafe) return res.status(404).json({ error: 'Lote não encontrado' });
+    if (cafe.usuario_id !== req.usuario.id) return res.status(403).json({ error: 'Sem permissão' });
+
+    const url = req.body.url;
+    const fotos = (cafe.fotos || []).filter((f) => f !== url);
+    const marcador = `/${BUCKET_FOTOS}/`;
+    if (url && url.includes(marcador)) {
+      await supabase.storage.from(BUCKET_FOTOS).remove([url.split(marcador)[1]]);
+    }
+
+    const { data, error } = await supabase
+      .from('cafes')
+      .update({ fotos, imagem_url: cafe.imagem_url === url ? (fotos[0] || null) : cafe.imagem_url })
+      .eq('id', cafe.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao remover foto' });
   }
 });
 

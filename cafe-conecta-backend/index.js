@@ -16,7 +16,7 @@ const pagbankRoutes = require('./api/pagbank');
 const app = express();
 
 app.use(cors({ origin: '*' }));
-app.use(express.json());
+app.use(express.json({ limit: '4mb' })); // fotos e imagens da IA chegam em base64
 
 // Health check
 app.get('/', (req, res) => {
@@ -32,6 +32,8 @@ app.use('/favoritos', favoritosRoutes);
 app.use('/mensagens', mensagensRoutes);
 app.use('/planos', planosRoutes);
 app.use('/avaliacoes', require('./api/avaliacoes'));
+app.use('/ia', require('./api/ia').iaRouter);
+app.use('/laudos', require('./api/ia').laudosRouter);
 app.use('/debug', require('./api/debug'));
 app.use('/webhook', webhookRoutes);
 app.use('/dashboard', dashboardRoutes);

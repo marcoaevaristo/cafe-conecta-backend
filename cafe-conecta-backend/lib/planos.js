@@ -7,16 +7,24 @@ const ORDEM = ['gratuito', 'basico', 'profissional', 'premium'];
 const NOMES = { gratuito: 'Gratuito', basico: 'Básico', profissional: 'Profissional', premium: 'Premium' };
 
 const LIMITES = {
-  gratuito:     { lotes_ativos: 2,    propostas_mes: 3,    alertas: 1 },
-  basico:       { lotes_ativos: 5,    propostas_mes: 10,   alertas: null },
-  profissional: { lotes_ativos: null, propostas_mes: null, alertas: null },
-  premium:      { lotes_ativos: null, propostas_mes: null, alertas: null },
+  gratuito:     { lotes_ativos: 2,    propostas_mes: 3,    alertas: 1,    fotos_por_lote: 0,    laudos_mes: 0 },
+  basico:       { lotes_ativos: 5,    propostas_mes: 10,   alertas: null, fotos_por_lote: 3,    laudos_mes: 0 },
+  profissional: { lotes_ativos: null, propostas_mes: null, alertas: null, fotos_por_lote: 10,   laudos_mes: 10 },
+  premium:      { lotes_ativos: null, propostas_mes: null, alertas: null, fotos_por_lote: null, laudos_mes: null },
 };
 
 const DESCRICAO = {
   lotes_ativos: (n) => `${n} lote${n > 1 ? 's' : ''} ativo${n > 1 ? 's' : ''}`,
   propostas_mes: (n) => `${n} proposta${n > 1 ? 's' : ''} por mês`,
   alertas: (n) => `${n} alerta${n > 1 ? 's' : ''} de preço`,
+  fotos_por_lote: (n) => `${n} foto${n > 1 ? 's' : ''} por lote`,
+  laudos_mes: (n) => `${n} análise${n > 1 ? 's' : ''} de IA por mês`,
+};
+
+// Usado quando o plano não inclui o recurso (limite 0)
+const NOME_RECURSO = {
+  fotos_por_lote: 'fotos nos anúncios',
+  laudos_mes: 'a classificação por IA e o laudo digital',
 };
 
 // Plano válido: um plano pago vencido (plano_valido_ate no passado) volta a ser gratuito.
@@ -42,7 +50,9 @@ function avaliarLimite(plano, recurso, usoAtual) {
     permitido: false,
     limite,
     resposta: {
-      error: `Seu plano ${NOMES[plano]} permite ${DESCRICAO[recurso](limite)}. `
+      error: (limite === 0
+        ? `Seu plano ${NOMES[plano]} não inclui ${NOME_RECURSO[recurso] || 'este recurso'}. `
+        : `Seu plano ${NOMES[plano]} permite ${DESCRICAO[recurso](limite)}. `)
         + `Faça upgrade para o ${NOMES[necessario]} para continuar.`,
       codigo: 'LIMITE_PLANO',
       recurso,
@@ -72,6 +82,9 @@ async function contarUso(usuarioId, recurso) {
     // Conta as propostas abertas pelo usuário como comprador; contrapropostas não contam.
     q = supabase.from('propostas').select('id', { count: 'exact', head: true })
       .eq('comprador_id', usuarioId).gte('criado_em', inicioDoMes());
+  } else if (recurso === 'laudos_mes') {
+    q = supabase.from('laudos').select('id', { count: 'exact', head: true })
+      .eq('usuario_id', usuarioId).gte('criado_em', inicioDoMes());
   } else if (recurso === 'alertas') {
     q = supabase.from('alertas').select('id', { count: 'exact', head: true })
       .eq('usuario_id', usuarioId);
