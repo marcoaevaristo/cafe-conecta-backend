@@ -152,6 +152,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
     if (error) throw error;
     res.json(data);
   } catch (err) {
+    console.error('Erro ao atualizar lote:', err);
     res.status(500).json({ error: 'Erro ao atualizar lote' });
   }
 });
@@ -255,19 +256,52 @@ router.delete('/:id/fotos', authMiddleware, async (req, res) => {
   }
 });
 
-// DELETE /cafes/:id
+// DELETE /cafes/:id — exclui o lote e as fotos. Lote com propostas não pode ser
+// excluído (perderia o histórico da negociação): o app sugere encerrar.
 router.delete('/:id', authMiddleware, async (req, res) => {
   try {
     const { data: cafe } = await supabase
-      .from('cafes').select('usuario_id').eq('id', req.params.id).single();
+      .from('cafes').select('*').eq('id', req.params.id).single();
 
-    if (!cafe || cafe.usuario_id !== req.usuario.id) {
+    if (!cafe) return res.status(404).json({ error: 'Lote não encontrado' });
+    if (cafe.usuario_id !== req.usuario.id) {
       return res.status(403).json({ error: 'Sem permissão' });
     }
 
-    await supabase.from('cafes').delete().eq('id', req.params.id);
+    const { count, error: errProp } = await supabase
+      .from('propostas').select('id', { count: 'exact', head: true }).eq('cafe_id', cafe.id);
+    if (errProp) throw errProp;
+    if (count > 0) {
+      return res.status(409).json({
+        error: `Este lote tem ${count} proposta(s) e não pode ser excluído. Use "Encerrar" para tirá-lo do catálogo e manter o histórico.`,
+        codigo: 'LOTE_COM_PROPOSTAS',
+      });
+    }
+
+    const { error } = await supabase.from('cafes').delete().eq('id', cafe.id);
+    if (error) {
+      if (error.code === '23503') {
+        return res.status(409).json({
+          error: 'Este lote está ligado a outros registros e não pode ser excluído. Use "Encerrar".',
+          codigo: 'LOTE_VINCULADO',
+        });
+      }
+      throw error;
+    }
+
+    // Apaga as fotos do Storage (falha aqui não desfaz a exclusão)
+    const marcador = `/${BUCKET_FOTOS}/`;
+    const caminhos = (cafe.fotos || [])
+      .filter((u) => typeof u === 'string' && u.includes(marcador))
+      .map((u) => u.split(marcador)[1]);
+    if (caminhos.length) {
+      const { error: errFotos } = await supabase.storage.from(BUCKET_FOTOS).remove(caminhos);
+      if (errFotos) console.error('Erro ao apagar fotos do lote excluído:', errFotos);
+    }
+
     res.json({ ok: true });
   } catch (err) {
+    console.error('Erro ao excluir lote:', err);
     res.status(500).json({ error: 'Erro ao excluir lote' });
   }
 });
