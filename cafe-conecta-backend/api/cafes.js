@@ -157,11 +157,19 @@ router.put('/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// PATCH /cafes/:id/status — usado pelo app (ativo | pausado | encerrado)
+// PATCH /cafes/:id/status — usado pelo app (ativo | pausado | encerrado | vendido)
+// Para "vendido", aceita preco_venda (preço final por saca, opcional).
 router.patch('/:id/status', authMiddleware, async (req, res) => {
   const { status } = req.body;
-  if (!['ativo', 'pausado', 'encerrado'].includes(status)) {
+  if (!['ativo', 'pausado', 'encerrado', 'vendido'].includes(status)) {
     return res.status(400).json({ error: 'Status inválido' });
+  }
+  let precoVenda = null;
+  if (status === 'vendido' && req.body.preco_venda != null && req.body.preco_venda !== '') {
+    precoVenda = Number(req.body.preco_venda);
+    if (!Number.isFinite(precoVenda) || precoVenda <= 0) {
+      return res.status(400).json({ error: 'Preço de venda inválido' });
+    }
   }
   try {
     const { data: cafe } = await supabase
@@ -173,16 +181,35 @@ router.patch('/:id/status', authMiddleware, async (req, res) => {
     if (status === 'ativo' && cafe.status !== 'ativo'
         && !(await exigirLimite(req, res, 'lotes_ativos'))) return;
 
+    const mudancas = { status };
+    if (status === 'vendido') {
+      mudancas.vendido_em = new Date().toISOString();
+      mudancas.preco_venda = precoVenda;
+    } else if (cafe.status === 'vendido') {
+      // desfez a venda (marcou por engano): limpa os dados da venda
+      mudancas.vendido_em = null;
+      mudancas.preco_venda = null;
+    }
+
     const { data, error } = await supabase
       .from('cafes')
-      .update({ status })
+      .update(mudancas)
       .eq('id', req.params.id)
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      // banco ainda sem a migração do status "vendido"
+      if (['23514', '42703', 'PGRST204'].includes(error.code)) {
+        return res.status(503).json({
+          error: 'O status "vendido" ainda não foi ativado no banco. Rode scripts/migration_lote_vendido.sql no Supabase.',
+        });
+      }
+      throw error;
+    }
     res.json(data);
   } catch (err) {
+    console.error('Erro ao atualizar status do lote:', err);
     res.status(500).json({ error: 'Erro ao atualizar status do lote' });
   }
 });

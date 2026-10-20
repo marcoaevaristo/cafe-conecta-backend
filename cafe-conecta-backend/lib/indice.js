@@ -1,5 +1,6 @@
 // lib/indice.js — Índice Café Conecta: preços reais do próprio marketplace.
-// Médias ponderadas pelo número de sacas. Preços de negócios fechados só aparecem
+// Médias ponderadas pelo número de sacas. Negócios fechados = propostas aceitas
+// + lotes marcados como vendidos com preço final. Esses preços só aparecem
 // agregados com pelo menos MIN_NEGOCIOS por grupo, para não expor uma negociação
 // individual.
 const supabase = require('./supabase');
@@ -51,13 +52,23 @@ async function calcularIndice() {
     supabase.from('cafes').select('tipo, regiao, preco_saca, quantidade_sacas').eq('status', 'ativo'),
     supabase
       .from('propostas')
-      .select('valor_proposto, quantidade_sacas, status, criado_em, cafe:cafes(tipo, regiao)')
+      .select('cafe_id, valor_proposto, quantidade_sacas, status, criado_em, cafe:cafes(tipo, regiao)')
       .in('status', ['aceita', 'concluida'])
       .gte('criado_em', desde),
   ]);
   if (cafesRes.error) throw cafesRes.error;
   if (propostasRes.error) throw propostasRes.error;
-  const propostas = propostasRes.data;
+  const propostas = propostasRes.data || [];
+
+  // Lotes marcados como vendidos com o preço final informado pelo dono.
+  // Se o banco ainda não tem as colunas de venda, simplesmente não entram.
+  const vendidosRes = await supabase
+    .from('cafes')
+    .select('id, tipo, regiao, preco_venda, quantidade_sacas, vendido_em')
+    .eq('status', 'vendido')
+    .not('preco_venda', 'is', null)
+    .gte('vendido_em', desde);
+  const vendidos = vendidosRes.error ? [] : vendidosRes.data || [];
 
   const lotes = (cafesRes.data || []).map((c) => ({
     tipo: normalizarTipo(c.tipo),
@@ -82,12 +93,23 @@ async function calcularIndice() {
   }
   porTipo.sort((a, b) => b.sacas - a.sacas);
 
-  const fechados = (propostas || []).map((p) => ({
+  const fechados = propostas.map((p) => ({
     tipo: normalizarTipo(p.cafe?.tipo),
     regiao: normalizarRegiao(p.cafe?.regiao),
     preco: Number(p.valor_proposto) || 0,
     sacas: Number(p.quantidade_sacas) || 0,
   }));
+  // Um lote vendido por proposta aceita já está contado acima: não conta de novo
+  const lotesComProposta = new Set(propostas.map((p) => p.cafe_id));
+  for (const v of vendidos) {
+    if (lotesComProposta.has(v.id)) continue;
+    fechados.push({
+      tipo: normalizarTipo(v.tipo),
+      regiao: normalizarRegiao(v.regiao),
+      preco: Number(v.preco_venda) || 0,
+      sacas: Number(v.quantidade_sacas) || 0,
+    });
+  }
   const negocios = [];
   for (const [tipo, itens] of agrupar(fechados, (n) => n.tipo)) {
     const r = resumo(itens);
