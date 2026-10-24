@@ -3,6 +3,7 @@
 // O usuário pode desligar em Configurações (coluna usuarios.notificar_email).
 const supabase = require('./supabase');
 const { emailConfigurado, enviarEmail } = require('./email');
+const { enviarPush } = require('./push');
 
 const APP_URL = (process.env.APP_URL || 'https://cafe-conecta-flutter.vercel.app').replace(/\/+$/, '');
 const TEMPO_MAX_MS = 8000;
@@ -25,7 +26,8 @@ async function nomeDe(id) {
   return data?.nome || 'Um usuário';
 }
 
-/** Usuários que querem receber e-mail (quem desligou em Configurações fica de fora). */
+/** Destinatários do aviso. querEmail=false para quem desligou o e-mail em Configurações
+ *  (essas pessoas ainda recebem a notificação push, se tiverem ligado no aparelho). */
 async function destinatarios(ids) {
   const unicos = [...new Set(ids.filter(Boolean))];
   if (!unicos.length) return [];
@@ -34,7 +36,7 @@ async function destinatarios(ids) {
   // preferência: se a coluna ainda não existe, todos recebem
   const pref = await supabase.from('usuarios').select('id, notificar_email').in('id', unicos);
   const desligados = new Set(pref.error ? [] : pref.data.filter((u) => u.notificar_email === false).map((u) => u.id));
-  return data.filter((u) => u.email && !desligados.has(u.id));
+  return data.map((u) => ({ ...u, querEmail: Boolean(u.email) && !desligados.has(u.id) }));
 }
 
 function montarEmail({ nome, titulo, paragrafos, destaque, botao }) {
@@ -55,6 +57,8 @@ function montarEmail({ nome, titulo, paragrafos, destaque, botao }) {
 }
 
 async function enviarPara(usuario, assunto, conteudo) {
+  await enviarPush(usuario.id, { titulo: assunto, corpo: (conteudo.paragrafos || [])[0] || conteudo.titulo, url: APP_URL });
+  if (!usuario.querEmail || !emailConfigurado()) return;
   try {
     const { texto, html } = montarEmail({ nome: usuario.nome, ...conteudo });
     await comTempoLimite(enviarEmail({ para: usuario.email, assunto, texto, html }));
@@ -65,7 +69,6 @@ async function enviarPara(usuario, assunto, conteudo) {
 
 /** Executa um aviso sem nunca lançar erro para quem chamou. */
 async function seguro(fn) {
-  if (!emailConfigurado()) return;
   try { await fn(); } catch (err) { console.error('Erro ao preparar aviso:', err.message); }
 }
 

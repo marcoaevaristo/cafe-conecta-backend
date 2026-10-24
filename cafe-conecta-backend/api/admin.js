@@ -227,4 +227,4 @@ router.post('/usuarios/:id/plano', authMiddleware, exigirAdmin, async (req, res)
   }
 });
 
-module.exports = { router, ehAdmin };
+module.exports = { router, ehAdmin, exigirAdmin };

@@ -7,6 +7,7 @@ const {
 const { exigirLimite } = require('../lib/planos');
 
 const avisos = require('../lib/notificacoes');
+const { lerCondicoes } = require('../lib/validacao');
 const router = express.Router();
 
 const SELECT_COMPLETO = `*, cafe:cafes(id, tipo, classificacao, cidade, estado, preco_saca), comprador:usuarios!propostas_comprador_id_fkey(id, nome, cidade), produtor:usuarios!propostas_produtor_id_fkey(id, nome, cidade)`;
@@ -140,16 +141,6 @@ router.post('/', authMiddleware, async (req, res) => {
 });
 
 // Separa o texto livre da proposta nas condições que o app enviou
-function lerCondicoes(mensagem) {
-  const c = { pagamento: null, prazo_entrega: null, local_entrega: null, observacoes: [] };
-  for (const linha of String(mensagem || '').split('\n').map((l) => l.trim()).filter(Boolean)) {
-    if (/^Pagamento:/i.test(linha)) c.pagamento = linha.replace(/^Pagamento:\s*/i, '');
-    else if (/^Prazo de entrega:/i.test(linha)) c.prazo_entrega = linha.replace(/^Prazo de entrega:\s*/i, '');
-    else if (/^Local de entrega:/i.test(linha)) c.local_entrega = linha.replace(/^Local de entrega:\s*/i, '');
-    else c.observacoes.push(linha);
-  }
-  return { ...c, observacoes: c.observacoes.join('\n') || null };
-}
 
 // GET /propostas/:id/contrato — dados para a minuta de contrato (só as duas partes, só aceita)
 router.get('/:id/contrato', authMiddleware, async (req, res) => {

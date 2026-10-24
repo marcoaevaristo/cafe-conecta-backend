@@ -1,11 +1,13 @@
 {
   "name": "cafe-conecta-backend",
   "version": "1.0.0",
-  "description": "API backend do Caf\u00e9 Conecta",
+  "description": "API backend do Café Conecta",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "test": "node --test test/*.test.js",
+    "vercel-build": "node --test test/*.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
