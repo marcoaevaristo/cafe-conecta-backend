@@ -27,6 +27,29 @@ function marcarDestaque(cafe, mostrarTelefone = false) {
 }
 
 const avisos = require('../lib/notificacoes');
+
+// Ficha do café especial (opcional). Só entram os campos enviados, já validados.
+function lerFicha(b) {
+  const f = {};
+  const texto = (v) => (v == null || String(v).trim() === '' ? null : String(v).trim().slice(0, 60));
+  if ('variedade' in b) f.variedade = texto(b.variedade);
+  if ('processamento' in b) f.processamento = texto(b.processamento);
+  if ('altitude' in b) {
+    const a = parseInt(b.altitude, 10);
+    f.altitude = Number.isFinite(a) && a > 0 && a < 3000 ? a : null;
+  }
+  if ('pontuacao_sca' in b) {
+    const p = Number(b.pontuacao_sca);
+    f.pontuacao_sca = Number.isFinite(p) && p >= 60 && p <= 100 ? Math.round(p * 10) / 10 : null;
+  }
+  if ('certificacoes' in b) {
+    f.certificacoes = Array.isArray(b.certificacoes)
+      ? [...new Set(b.certificacoes.map((c) => String(c).trim().slice(0, 40)).filter(Boolean))].slice(0, 10)
+      : [];
+  }
+  return f;
+}
+const faltaColunaFicha = (e) => e && ['42703', 'PGRST204'].includes(e.code);
 const router = express.Router();
 
 // GET /cafes — listar lotes disponíveis
@@ -118,10 +141,12 @@ router.post('/', authMiddleware, async (req, res) => {
         peneira: peneira ?? null,
         safra: safra ?? null,
         status: status ?? 'ativo',
+        ...lerFicha(req.body),
       })
       .select()
       .single();
 
+    if (faltaColunaFicha(error)) return res.status(503).json({ error: 'A ficha do café especial ainda não foi ativada no servidor. Tente sem esses campos ou mais tarde.' });
     if (error) throw error;
     await avisos.alertasParaLote(data);
     res.status(201).json(data);
@@ -147,11 +172,12 @@ router.put('/:id', authMiddleware, async (req, res) => {
 
     const { data, error } = await supabase
       .from('cafes')
-      .update({ tipo, classificacao, quantidade_sacas, preco_saca, cidade, estado, regiao, fazenda, score, descricao, status, bebida, peneira, safra, lat, lng })
+      .update({ tipo, classificacao, quantidade_sacas, preco_saca, cidade, estado, regiao, fazenda, score, descricao, status, bebida, peneira, safra, lat, lng, ...lerFicha(req.body) })
       .eq('id', req.params.id)
       .select()
       .single();
 
+    if (faltaColunaFicha(error)) return res.status(503).json({ error: 'A ficha do café especial ainda não foi ativada no servidor. Tente sem esses campos ou mais tarde.' });
     if (error) throw error;
     res.json(data);
   } catch (err) {
