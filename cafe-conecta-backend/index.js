@@ -37,7 +37,7 @@ app.get('/saude', async (req, res) => {
     banco,
     email: require('./lib/email').emailConfigurado(),
     push: Boolean(require('./lib/push').chavesVapid()),
-    login_google: Boolean((process.env.GOOGLE_CLIENT_ID || '').trim()),
+    login_google: true,
   };
   res.status(banco ? 200 : 503).json({ status: banco ? 'ok' : 'falha', verificacoes, ms: Date.now() - inicio, em: new Date().toISOString() });
 });

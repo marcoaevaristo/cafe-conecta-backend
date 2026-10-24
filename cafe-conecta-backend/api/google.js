@@ -11,7 +11,10 @@ const { JWT_SECRET } = require('../middleware/auth');
 const { chaveIp, respeitarLimites } = require('../lib/limite');
 
 const router = express.Router();
-const clientId = () => (process.env.GOOGLE_CLIENT_ID || '').trim();
+// Client ID web do projeto "Cafe Conecta" no Google Cloud. Não é segredo (vai para o navegador);
+// a variável GOOGLE_CLIENT_ID na Vercel, se existir, tem prioridade.
+const CLIENT_ID_PADRAO = '781695410067-pegmof6cj2ot549nqntf3l46ffbo8rjn.apps.googleusercontent.com';
+const clientId = () => (process.env.GOOGLE_CLIENT_ID || CLIENT_ID_PADRAO).trim();
 
 // GET /auth/google/config — o app só mostra o botão quando há Client ID configurado
 router.get('/config', (req, res) => res.json({ client_id: clientId() || null }));
