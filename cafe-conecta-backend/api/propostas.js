@@ -139,6 +139,58 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 });
 
+// Separa o texto livre da proposta nas condições que o app enviou
+function lerCondicoes(mensagem) {
+  const c = { pagamento: null, prazo_entrega: null, local_entrega: null, observacoes: [] };
+  for (const linha of String(mensagem || '').split('\n').map((l) => l.trim()).filter(Boolean)) {
+    if (/^Pagamento:/i.test(linha)) c.pagamento = linha.replace(/^Pagamento:\s*/i, '');
+    else if (/^Prazo de entrega:/i.test(linha)) c.prazo_entrega = linha.replace(/^Prazo de entrega:\s*/i, '');
+    else if (/^Local de entrega:/i.test(linha)) c.local_entrega = linha.replace(/^Local de entrega:\s*/i, '');
+    else c.observacoes.push(linha);
+  }
+  return { ...c, observacoes: c.observacoes.join('\n') || null };
+}
+
+// GET /propostas/:id/contrato — dados para a minuta de contrato (só as duas partes, só aceita)
+router.get('/:id/contrato', authMiddleware, async (req, res) => {
+  try {
+    const { data: p, error } = await supabase
+      .from('propostas')
+      .select(`*, cafe:cafes(id, tipo, classificacao, bebida, peneira, safra, fazenda, cidade, estado, regiao),
+        comprador:usuarios!propostas_comprador_id_fkey(id, nome, cidade, estado, telefone, email),
+        produtor:usuarios!propostas_produtor_id_fkey(id, nome, cidade, estado, telefone, email)`)
+      .eq('id', req.params.id)
+      .single();
+    if (error || !p) return res.status(404).json({ error: 'Proposta não encontrada' });
+    if (![p.comprador_id, p.produtor_id].includes(req.usuario.id)) {
+      return res.status(403).json({ error: 'Sem permissão' });
+    }
+    if (p.status !== 'aceita') {
+      return res.status(400).json({ error: 'O contrato fica disponível depois que a proposta é aceita.' });
+    }
+    const parte = (u) => u && ({
+      nome: u.nome, cidade: u.cidade, estado: u.estado, telefone: u.telefone, email: u.email,
+    });
+    const preco = Number(p.valor_proposto);
+    const sacas = Number(p.quantidade_sacas);
+    res.json({
+      id: p.id,
+      numero: String(p.id).slice(0, 8).toUpperCase(),
+      aceita_em: p.atualizado_em || p.criado_em,
+      vendedor: parte(p.produtor),
+      comprador: parte(p.comprador),
+      lote: p.cafe,
+      quantidade_sacas: sacas,
+      preco_saca: preco,
+      total: Math.round(preco * sacas * 100) / 100,
+      condicoes: lerCondicoes(p.mensagem),
+    });
+  } catch (err) {
+    console.error('Erro contrato:', err);
+    res.status(500).json({ error: 'Erro ao gerar os dados do contrato' });
+  }
+});
+
 // PUT/PATCH /propostas/:id/status — aceitar / recusar / contraproposta / cancelar
 async function atualizarStatus(req, res) {
   const status = statusPropostaParaDb(req.body.status);
