@@ -148,4 +148,18 @@ router.patch('/:id/membros/:usuarioId', async (req, res) => {
   }
 });
 
+// DELETE /empresas/:id — só o dono exclui a empresa (os membros saem junto)
+router.delete('/:id', async (req, res) => {
+  try {
+    const { data: empresa } = await supabase.from('empresas').select('dono_id').eq('id', req.params.id).single();
+    if (!empresa) return res.status(404).json({ error: 'Empresa não encontrada' });
+    if (empresa.dono_id !== req.usuario.id) return res.status(403).json({ error: 'Só o dono pode excluir a empresa' });
+    const { error } = await supabase.from('empresas').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) {
+    falha(res, err, 'Erro ao excluir a empresa');
+  }
+});
+
 module.exports = router;
