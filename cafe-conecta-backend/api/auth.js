@@ -27,6 +27,15 @@ router.post('/cadastro', async (req, res) => {
     return res.status(400).json({ error: 'Tipo deve ser produtor, comprador ou corretor' });
   }
 
+  // LGPD: o cadastro só segue com o aceite dos Termos e da Política de privacidade
+  if (req.body.aceite_termos !== true) {
+    return res.status(400).json({ error: 'Para criar a conta, aceite os Termos de uso e a Política de privacidade.' });
+  }
+  const aceite = {
+    termos_aceitos_em: new Date().toISOString(),
+    termos_versao: String(req.body.versao_termos || '').slice(0, 20) || null,
+  };
+
   try {
     const { data: existe } = await supabase
       .from('usuarios')
@@ -38,11 +47,15 @@ router.post('/cadastro', async (req, res) => {
 
     const senhaHash = await bcrypt.hash(senha, 10);
 
-    const { data: usuario, error } = await supabase
-      .from('usuarios')
-      .insert({ nome, email, senha_hash: senhaHash, telefone, cidade, estado, tipo })
-      .select('id, nome, email, tipo, plano, cidade, estado, telefone, criado_em')
-      .single();
+    const novo = { nome, email, senha_hash: senhaHash, telefone, cidade, estado, tipo };
+    const campos = 'id, nome, email, tipo, plano, cidade, estado, telefone, criado_em';
+    let { data: usuario, error } = await supabase
+      .from('usuarios').insert({ ...novo, ...aceite }).select(campos).single();
+    // banco ainda sem as colunas do aceite (migration_termos.sql): cadastra mesmo assim
+    if (error && ['42703', 'PGRST204'].includes(error.code)) {
+      console.warn('Aceite dos termos não registrado: rode scripts/migration_termos.sql');
+      ({ data: usuario, error } = await supabase.from('usuarios').insert(novo).select(campos).single());
+    }
 
     if (error) throw error;
 
