@@ -141,6 +141,29 @@ router.get('/me', authMiddleware, async (req, res) => {
   }
 });
 
+// GET/PUT /auth/custo — custo de produção por saca (só o próprio usuário vê)
+router.get('/custo', authMiddleware, async (req, res) => {
+  const { data, error } = await supabase
+    .from('usuarios').select('custo_saca').eq('id', req.usuario.id).single();
+  if (error) return res.json({ custo_saca: null, disponivel: false });
+  res.json({ custo_saca: data?.custo_saca != null ? Number(data.custo_saca) : null, disponivel: true });
+});
+
+router.put('/custo', authMiddleware, async (req, res) => {
+  const v = req.body.custo_saca;
+  const custo = v == null || v === '' ? null : Number(v);
+  if (custo != null && (!Number.isFinite(custo) || custo <= 0 || custo > 100000)) {
+    return res.status(400).json({ error: 'Custo por saca inválido' });
+  }
+  const { error } = await supabase
+    .from('usuarios').update({ custo_saca: custo }).eq('id', req.usuario.id);
+  if (error) {
+    console.error('Erro ao salvar custo:', error.message);
+    return res.status(503).json({ error: 'Não foi possível salvar o custo agora. Tente mais tarde.' });
+  }
+  res.json({ custo_saca: custo });
+});
+
 // GET/PUT /auth/notificacoes — liga/desliga os avisos por e-mail
 router.get('/notificacoes', authMiddleware, async (req, res) => {
   const { data, error } = await supabase
