@@ -174,4 +174,108 @@ async function alertasParaLote(cafe) {
   });
 }
 
-module.exports = { novaProposta, respostaProposta, novaMensagem, alertasParaLote, alertaCombina };
+// ── Pedidos de compra ────────────────────────────────────────────────
+// Vendedores com lote ativo compatível (tipo, região e preço) ficam sabendo do pedido
+function loteAtendePedido(cafe, pedido) {
+  if (!igual(cafe.tipo, pedido.tipo)) return false;
+  if (pedido.classificacao && !igual(cafe.classificacao, pedido.classificacao)) return false;
+  if (pedido.regiao && !igual(cafe.regiao, pedido.regiao)) return false;
+  if (pedido.preco_maximo != null && cafe.preco_saca != null
+      && Number(cafe.preco_saca) > Number(pedido.preco_maximo) * 1.05) return false; // tolera 5%
+  return true;
+}
+
+async function pedidoParaVendedores(pedido) {
+  return seguro(async () => {
+    const { data: lotes, error } = await supabase
+      .from('cafes').select('usuario_id, tipo, classificacao, regiao, preco_saca')
+      .eq('status', 'ativo').neq('usuario_id', pedido.usuario_id);
+    if (error || !lotes?.length) return;
+    const ids = [...new Set(lotes.filter((l) => loteAtendePedido(l, pedido)).map((l) => l.usuario_id))]
+      .slice(0, MAX_EMAILS_ALERTA);
+    const pessoas = await destinatarios(ids);
+    const oQue = [pedido.tipo, pedido.classificacao, pedido.bebida && `bebida ${pedido.bebida}`].filter(Boolean).join(' · ');
+    await Promise.allSettled(pessoas.map((p) => enviarPara(p, `🛒 Comprador procurando ${pedido.quantidade_sacas} sacas de ${pedido.tipo}`, {
+      titulo: 'Tem comprador procurando um café parecido com o seu',
+      paragrafos: [
+        `${oQue}${pedido.regiao ? ` — ${pedido.regiao}` : ''}`,
+        `${pedido.quantidade_sacas} sacas${pedido.preco_maximo != null ? `, até ${brl(pedido.preco_maximo)} por saca` : ''}.`,
+        'Abra Pedidos de compra no app para mandar sua oferta.',
+      ],
+      botao: 'Ver pedido',
+    })));
+  });
+}
+
+async function novaOfertaPedido({ oferta, pedido }) {
+  return seguro(async () => {
+    const [dono] = await destinatarios([pedido.usuario_id]);
+    if (!dono) return;
+    const vendedor = await nomeDe(oferta.usuario_id);
+    await enviarPara(dono, `Nova oferta de ${vendedor} para o seu pedido`, {
+      titulo: `${vendedor} ofertou café para o seu pedido`,
+      paragrafos: [
+        `Pedido: ${pedido.quantidade_sacas} sacas de ${pedido.tipo}.`,
+        `Oferta: ${oferta.quantidade_sacas} sacas a ${brl(oferta.preco_saca)} por saca.`,
+        'Abra Pedidos de compra → Meus pedidos para aceitar ou recusar.',
+      ],
+      destaque: oferta.mensagem ? String(oferta.mensagem).slice(0, 300) : null,
+      botao: 'Ver oferta',
+    });
+  });
+}
+
+async function respostaOfertaPedido({ oferta, pedido, status }) {
+  return seguro(async () => {
+    const [vendedor] = await destinatarios([oferta.usuario_id]);
+    if (!vendedor) return;
+    const comprador = await nomeDe(pedido.usuario_id);
+    const aceita = status === 'aceita';
+    await enviarPara(vendedor, aceita ? `${comprador} aceitou sua oferta 🎉` : `${comprador} recusou sua oferta`, {
+      titulo: aceita ? `${comprador} aceitou sua oferta` : `${comprador} recusou sua oferta`,
+      paragrafos: [
+        `${oferta.quantidade_sacas} sacas de ${pedido.tipo} a ${brl(oferta.preco_saca)} por saca.`,
+        aceita ? 'Combine entrega e pagamento pelo chat do app.' : 'Outros pedidos de compra podem combinar com o seu café.',
+      ],
+      botao: aceita ? 'Abrir conversa' : 'Ver pedidos',
+    });
+  });
+}
+
+// ── Amostras ─────────────────────────────────────────────────────────
+const ROTULO_AMOSTRA = {
+  solicitada: 'pediu uma amostra do seu lote',
+  enviada: 'enviou a amostra que você pediu',
+  recebida: 'recebeu a amostra',
+  avaliada: 'registrou o resultado da prova da sua amostra',
+  recusada: 'não pôde enviar a amostra',
+  cancelada: 'cancelou o pedido de amostra',
+};
+
+async function eventoAmostra({ amostra, autorId, paraId }) {
+  return seguro(async () => {
+    const [para] = await destinatarios([paraId]);
+    if (!para) return;
+    const autor = await nomeDe(autorId);
+    const { data: cafe } = await supabase.from('cafes').select('tipo, classificacao, fazenda, cidade').eq('id', amostra.cafe_id).single();
+    const acao = ROTULO_AMOSTRA[amostra.status] || 'atualizou a amostra';
+    const linhas = [`Lote: ${resumoLote(cafe)}`];
+    if (amostra.status === 'enviada' && amostra.codigo_rastreio) linhas.push(`Código de rastreio: ${amostra.codigo_rastreio}`);
+    if (amostra.status === 'avaliada') {
+      linhas.push([amostra.nota != null && `Nota: ${amostra.nota}`, amostra.bebida_resultado && `bebida ${amostra.bebida_resultado}`,
+        amostra.defeitos != null && `${amostra.defeitos} defeitos`].filter(Boolean).join(' · '));
+    }
+    linhas.push('Acompanhe em Amostras, no app.');
+    await enviarPara(para, `${autor} ${acao}`, {
+      titulo: `${autor} ${acao}`,
+      paragrafos: linhas,
+      destaque: amostra.status === 'avaliada' ? amostra.comentario : amostra.status === 'solicitada' ? amostra.observacoes : null,
+      botao: 'Ver amostra',
+    });
+  });
+}
+
+module.exports = {
+  novaProposta, respostaProposta, novaMensagem, alertasParaLote, alertaCombina,
+  pedidoParaVendedores, novaOfertaPedido, respostaOfertaPedido, loteAtendePedido, eventoAmostra,
+};

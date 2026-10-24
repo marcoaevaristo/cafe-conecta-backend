@@ -28,6 +28,7 @@ app.use('/auth', authRoutes);
 app.use('/cafes', cafesRoutes);
 app.use('/propostas', propostasRoutes);
 app.use('/alertas', alertasRoutes);
+app.use('/pedidos', require('./api/pedidos'));
 app.use('/favoritos', favoritosRoutes);
 app.use('/mensagens', mensagensRoutes);
 app.use('/planos', planosRoutes);
