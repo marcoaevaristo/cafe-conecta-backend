@@ -6,6 +6,7 @@ const {
 } = require('../lib/mapper');
 const { exigirLimite } = require('../lib/planos');
 
+const avisos = require('../lib/notificacoes');
 const router = express.Router();
 
 const SELECT_COMPLETO = `*, cafe:cafes(id, tipo, classificacao, cidade, estado, preco_saca), comprador:usuarios!propostas_comprador_id_fkey(id, nome, cidade), produtor:usuarios!propostas_produtor_id_fkey(id, nome, cidade)`;
@@ -96,6 +97,7 @@ router.post('/', authMiddleware, async (req, res) => {
         .eq('id', original.id);
       if (errStatus) throw errStatus;
 
+      await avisos.novaProposta({ proposta: data, autorId: eu, paraId: destinatarioDaProposta(data), contraproposta: true });
       return res.status(201).json(propostaParaApp(data));
     }
 
@@ -129,6 +131,7 @@ router.post('/', authMiddleware, async (req, res) => {
       .single();
 
     if (error) throw error;
+    await avisos.novaProposta({ proposta: data, autorId: eu, paraId: cafe.usuario_id });
     res.status(201).json(propostaParaApp(data));
   } catch (err) {
     console.error('Erro ao criar proposta:', err);
@@ -174,6 +177,9 @@ async function atualizarStatus(req, res) {
       return res.status(503).json({ error: MSG_MIGRACAO });
     }
     if (error) throw error;
+    await avisos.respostaProposta({
+      proposta: data, status, quemRespondeuId: req.usuario.id, autorId: autorDaProposta(data),
+    });
     res.json(propostaParaApp(data));
   } catch (err) {
     res.status(500).json({ error: 'Erro ao atualizar proposta' });

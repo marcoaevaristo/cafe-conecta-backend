@@ -3,6 +3,7 @@ const supabase = require('../lib/supabase');
 const { authMiddleware } = require('../middleware/auth');
 const { mensagemParaApp } = require('../lib/mapper');
 
+const avisos = require('../lib/notificacoes');
 const router = express.Router();
 
 const SELECT_COM_USUARIOS = `*, remetente:usuarios!mensagens_remetente_id_fkey(id, nome, avatar_url, verificado), destinatario:usuarios!mensagens_destinatario_id_fkey(id, nome, avatar_url, verificado)`;
@@ -143,6 +144,7 @@ router.post('/', authMiddleware, async (req, res) => {
       .single();
 
     if (error) throw error;
+    await avisos.novaMensagem({ mensagem: data });
     res.status(201).json(mensagemParaApp(data));
   } catch (err) {
     res.status(500).json({ error: 'Erro ao enviar mensagem' });

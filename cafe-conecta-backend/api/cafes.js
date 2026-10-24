@@ -26,6 +26,7 @@ function marcarDestaque(cafe, mostrarTelefone = false) {
   return { ...cafe, destaque, usuario: cafe.usuario ? usuarioPublico : cafe.usuario };
 }
 
+const avisos = require('../lib/notificacoes');
 const router = express.Router();
 
 // GET /cafes — listar lotes disponíveis
@@ -122,6 +123,7 @@ router.post('/', authMiddleware, async (req, res) => {
       .single();
 
     if (error) throw error;
+    await avisos.alertasParaLote(data);
     res.status(201).json(data);
   } catch (err) {
     console.error('Erro ao criar lote:', err);

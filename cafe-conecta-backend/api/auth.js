@@ -128,6 +128,27 @@ router.get('/me', authMiddleware, async (req, res) => {
   }
 });
 
+// GET/PUT /auth/notificacoes — liga/desliga os avisos por e-mail
+router.get('/notificacoes', authMiddleware, async (req, res) => {
+  const { data, error } = await supabase
+    .from('usuarios').select('notificar_email').eq('id', req.usuario.id).single();
+  if (error) return res.json({ email: true, disponivel: false });
+  res.json({ email: data?.notificar_email !== false, disponivel: true });
+});
+
+router.put('/notificacoes', authMiddleware, async (req, res) => {
+  if (typeof req.body.email !== 'boolean') {
+    return res.status(400).json({ error: 'Informe email: true ou false' });
+  }
+  const { error } = await supabase
+    .from('usuarios').update({ notificar_email: req.body.email }).eq('id', req.usuario.id);
+  if (error) {
+    console.error('Erro ao salvar preferência de avisos:', error.message);
+    return res.status(503).json({ error: 'Essa opção ainda não está disponível. Tente mais tarde.' });
+  }
+  res.json({ email: req.body.email });
+});
+
 // PUT /auth/perfil
 router.put('/perfil', authMiddleware, async (req, res) => {
   const { nome, telefone, cidade, estado } = req.body;

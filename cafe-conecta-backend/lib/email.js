@@ -42,4 +42,15 @@ async function enviarCodigoRecuperacao(destino, nome, codigo) {
   });
 }
 
-module.exports = { emailConfigurado, enviarCodigoRecuperacao };
+/** Envio genérico (avisos do app). */
+async function enviarEmail({ para, assunto, texto, html }) {
+  await obterTransporte().sendMail({
+    from: `"Café Conecta" <${process.env.GMAIL_USER}>`,
+    to: para,
+    subject: assunto,
+    text: texto,
+    html,
+  });
+}
+
+module.exports = { emailConfigurado, enviarCodigoRecuperacao, enviarEmail };
