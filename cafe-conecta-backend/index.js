@@ -29,6 +29,7 @@ app.use('/cafes', cafesRoutes);
 app.use('/propostas', propostasRoutes);
 app.use('/alertas', alertasRoutes);
 app.use('/pedidos', require('./api/pedidos'));
+app.use('/amostras', require('./api/amostras'));
 app.use('/favoritos', favoritosRoutes);
 app.use('/mensagens', mensagensRoutes);
 app.use('/planos', planosRoutes);
