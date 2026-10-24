@@ -8,12 +8,16 @@ const { authMiddleware, JWT_SECRET } = require('../middleware/auth');
 const { planoEfetivo } = require('../lib/planos');
 const { ehAdmin } = require('./admin');
 const { emailConfigurado, enviarCodigoRecuperacao } = require('../lib/email');
+const { chaveIp, chaveEmail, respeitarLimites, registrar } = require('../lib/limite');
 
 const router = express.Router();
 
 // POST /auth/cadastro
 router.post('/cadastro', async (req, res) => {
   const { nome, email, senha, telefone, cidade, estado, tipo } = req.body;
+
+  if (!(await respeitarLimites(res, [{ chave: `cadastro-ip:${chaveIp(req)}`, max: 10, minutos: 60 }],
+    { registrarAgora: true }))) return;
 
   if (!nome || !email || !senha || !tipo) {
     return res.status(400).json({ error: 'Campos obrigatórios: nome, email, senha, tipo' });
@@ -63,6 +67,18 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'E-mail e senha são obrigatórios' });
   }
 
+  // Erros de senha: até 8 por conta e 30 por rede a cada 15 minutos
+  const kEmail = `login:${chaveEmail(email)}`;
+  const kIp = `login-ip:${chaveIp(req)}`;
+  if (!(await respeitarLimites(res, [
+    { chave: kEmail, max: 8, minutos: 15 },
+    { chave: kIp, max: 30, minutos: 15 },
+  ]))) return;
+  const falhou = async () => {
+    await registrar(kEmail, kIp);
+    return res.status(401).json({ error: 'E-mail ou senha inválidos' });
+  };
+
   try {
     const { data: usuario, error } = await supabase
       .from('usuarios')
@@ -70,14 +86,10 @@ router.post('/login', async (req, res) => {
       .eq('email', email)
       .single();
 
-    if (error || !usuario) {
-      return res.status(401).json({ error: 'E-mail ou senha inválidos' });
-    }
+    if (error || !usuario) return falhou();
 
     const senhaValida = await bcrypt.compare(senha, usuario.senha_hash);
-    if (!senhaValida) {
-      return res.status(401).json({ error: 'E-mail ou senha inválidos' });
-    }
+    if (!senhaValida) return falhou();
 
     const token = jwt.sign(
       { id: usuario.id, email: usuario.email, tipo: usuario.tipo, plano: usuario.plano },
@@ -216,6 +228,10 @@ router.post('/esqueci-senha', async (req, res) => {
     return res.status(503).json({ error: 'A recuperação de senha está temporariamente indisponível. Tente mais tarde.' });
   }
 
+  // Evita usar o app para disparar e-mails em massa: 10 pedidos por rede por hora
+  if (!(await respeitarLimites(res, [{ chave: `reset-ip:${chaveIp(req)}`, max: 10, minutos: 60 }],
+    { registrarAgora: true }))) return;
+
   try {
     const { data: usuario } = await supabase
       .from('usuarios')
@@ -264,6 +280,9 @@ router.post('/resetar-senha', async (req, res) => {
   }
 
   const invalido = () => res.status(400).json({ error: 'Código inválido ou expirado. Solicite um novo.' });
+
+  if (!(await respeitarLimites(res, [{ chave: `resetcod-ip:${chaveIp(req)}`, max: 20, minutos: 60 }],
+    { registrarAgora: true }))) return;
 
   try {
     const { data: usuario } = await supabase

@@ -29,7 +29,12 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 
 async function criarMaster() {
   const email = process.env.MASTER_EMAIL || 'cafeconecta5@gmail.com';
-  const senha = process.env.MASTER_SENHA || 'Master@2024!';
+  // Senha só por variável de ambiente (o repositório é público)
+  const senha = process.env.MASTER_SENHA;
+  if (!senha || senha.length < 10) {
+    console.error('❌ Defina MASTER_SENHA (mínimo 10 caracteres) antes de rodar o script.');
+    process.exit(1);
+  }
   const nome  = process.env.MASTER_NOME  || 'Administrador Master';
 
   console.log('\n🚀 Criando usuário master: ' + email);
