@@ -7,6 +7,15 @@ const { authMiddleware } = require('../middleware/auth');
 const { texto, falhaCom } = require('../lib/rotas');
 const { lerPeriodo, relatorioDe } = require('../lib/relatorio');
 const { codigoConvite } = require('../lib/empresa');
+const { ehAdmin } = require('./admin');
+
+/** Conta master do app (ADMIN_EMAILS): administra todas as empresas. Confere o e-mail atual no banco. */
+async function souMaster(req) {
+  if (req._master !== undefined) return req._master;
+  const { data } = await supabase.from('usuarios').select('email').eq('id', req.usuario.id).single();
+  req._master = Boolean(data && ehAdmin(data.email));
+  return req._master;
+}
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -14,7 +23,8 @@ const falha = falhaCom('Conta empresarial ainda não foi ativada no servidor. Te
 const TIPOS = ['cooperativa', 'trading', 'banco', 'torrefacao', 'outro'];
 
 
-async function papelDe(empresaId, usuarioId) {
+async function papelDe(empresaId, usuarioId, req) {
+  if (req && (await souMaster(req))) return 'admin';
   const { data } = await supabase.from('empresa_membros').select('papel')
     .eq('empresa_id', empresaId).eq('usuario_id', usuarioId).maybeSingle();
   return data?.papel || null;
@@ -22,6 +32,17 @@ async function papelDe(empresaId, usuarioId) {
 
 router.get('/minhas', async (req, res) => {
   try {
+    if (await souMaster(req)) {
+      const [todas, minhas] = await Promise.all([
+        supabase.from('empresas').select('*').order('criado_em', { ascending: false }),
+        supabase.from('empresa_membros').select('empresa_id').eq('usuario_id', req.usuario.id),
+      ]);
+      if (todas.error) throw todas.error;
+      const membro = new Set((minhas.data || []).map((m) => m.empresa_id));
+      return res.json((todas.data || []).map((e) => ({
+        ...e, papel: 'admin', acesso_master: !membro.has(e.id), codigo_convite: codigoConvite(e.id),
+      })));
+    }
     const { data, error } = await supabase.from('empresa_membros')
       .select('papel, empresa:empresas(*)').eq('usuario_id', req.usuario.id);
     if (error) throw error;
@@ -74,7 +95,7 @@ router.post('/entrar', async (req, res) => {
 // GET /empresas/:id/membros — qualquer membro vê quem faz parte
 router.get('/:id/membros', async (req, res) => {
   try {
-    if (!(await papelDe(req.params.id, req.usuario.id))) return res.status(403).json({ error: 'Sem permissão' });
+    if (!(await papelDe(req.params.id, req.usuario.id, req))) return res.status(403).json({ error: 'Sem permissão' });
     const { data, error } = await supabase.from('empresa_membros')
       .select('papel, criado_em, usuario:usuarios(id, nome, cidade, estado, tipo)').eq('empresa_id', req.params.id);
     if (error) throw error;
@@ -87,7 +108,7 @@ router.get('/:id/membros', async (req, res) => {
 // GET /empresas/:id/painel?de&ate — só administradores
 router.get('/:id/painel', async (req, res) => {
   try {
-    if ((await papelDe(req.params.id, req.usuario.id)) !== 'admin') return res.status(403).json({ error: 'Só administradores veem o painel' });
+    if ((await papelDe(req.params.id, req.usuario.id, req)) !== 'admin') return res.status(403).json({ error: 'Só administradores veem o painel' });
     const { data: membros, error } = await supabase.from('empresa_membros')
       .select('usuario:usuarios(id, nome)').eq('empresa_id', req.params.id);
     if (error) throw error;
@@ -122,7 +143,7 @@ router.delete('/:id/membros/:usuarioId', async (req, res) => {
     const { data: empresa } = await supabase.from('empresas').select('dono_id').eq('id', req.params.id).single();
     if (!empresa) return res.status(404).json({ error: 'Empresa não encontrada' });
     if (alvo === empresa.dono_id) return res.status(400).json({ error: 'O dono não pode sair da empresa' });
-    if (alvo !== eu && (await papelDe(req.params.id, eu)) !== 'admin') return res.status(403).json({ error: 'Sem permissão' });
+    if (alvo !== eu && (await papelDe(req.params.id, eu, req)) !== 'admin') return res.status(403).json({ error: 'Sem permissão' });
     const { error } = await supabase.from('empresa_membros').delete().eq('empresa_id', req.params.id).eq('usuario_id', alvo);
     if (error) throw error;
     res.json({ ok: true });
@@ -136,7 +157,7 @@ router.patch('/:id/membros/:usuarioId', async (req, res) => {
   const papel = req.body?.papel;
   if (!['admin', 'membro'].includes(papel)) return res.status(400).json({ error: 'Papel inválido' });
   try {
-    if ((await papelDe(req.params.id, req.usuario.id)) !== 'admin') return res.status(403).json({ error: 'Sem permissão' });
+    if ((await papelDe(req.params.id, req.usuario.id, req)) !== 'admin') return res.status(403).json({ error: 'Sem permissão' });
     const { data: empresa } = await supabase.from('empresas').select('dono_id').eq('id', req.params.id).single();
     if (empresa?.dono_id === req.params.usuarioId && papel !== 'admin') return res.status(400).json({ error: 'O dono é sempre administrador' });
     const { error } = await supabase.from('empresa_membros').update({ papel })
@@ -153,7 +174,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const { data: empresa } = await supabase.from('empresas').select('dono_id').eq('id', req.params.id).single();
     if (!empresa) return res.status(404).json({ error: 'Empresa não encontrada' });
-    if (empresa.dono_id !== req.usuario.id) return res.status(403).json({ error: 'Só o dono pode excluir a empresa' });
+    if (empresa.dono_id !== req.usuario.id && !(await souMaster(req))) return res.status(403).json({ error: 'Só o dono pode excluir a empresa' });
     const { error } = await supabase.from('empresas').delete().eq('id', req.params.id);
     if (error) throw error;
     res.json({ ok: true });
