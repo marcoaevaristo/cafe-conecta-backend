@@ -37,6 +37,7 @@ app.use('/admin', require('./api/admin').router);
 app.use('/ia', require('./api/ia').iaRouter);
 app.use('/laudos', require('./api/ia').laudosRouter);
 app.use('/webhook', webhookRoutes);
+app.use('/', require('./api/compartilhar')); // /l/:id — link público do lote
 app.use('/dashboard', dashboardRoutes);
 app.use('/', dashboardRoutes); // expõe /historico-precos na raiz
 app.use('/api/cotacoes', cotacoesRoutes);
