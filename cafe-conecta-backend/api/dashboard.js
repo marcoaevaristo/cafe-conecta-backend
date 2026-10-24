@@ -35,6 +35,16 @@ router.get('/', authMiddleware, async (req, res) => {
       ? (avNotas.reduce((s, a) => s + a.nota, 0) / avNotas.length).toFixed(1)
       : null;
 
+    // Visualizações reais (visitantes únicos por dia nos detalhes dos lotes do usuário)
+    let visualizacoes = 0;
+    if (cafesData.length) {
+      const { count, error: errVis } = await supabase
+        .from('visualizacoes_lote')
+        .select('id', { count: 'exact', head: true })
+        .in('cafe_id', cafesData.map((c) => c.id));
+      if (!errVis) visualizacoes = count || 0;
+    }
+
     const lotesAtivos = cafesData.filter(c => c.status === 'ativo').length;
     const propostasRecebidas = propostasData.length;
     const negociosFechados = propostasData.filter(p => p.status === 'aceita' || p.status === 'concluida').length;
@@ -43,7 +53,7 @@ router.get('/', authMiddleware, async (req, res) => {
       lotes_ativos: lotesAtivos,
       lotes_total: cafesData.length,
       // Campos esperados pelo Flutter dashboard
-      visualizacoes: lotesAtivos * 12, // estimativa: cada lote ativo gera ~12 views
+      visualizacoes, // contagem real (tabela visualizacoes_lote)
       propostas_recebidas: propostasRecebidas,
       negocios_fechados: negociosFechados,
       // Campos legados

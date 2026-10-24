@@ -1,6 +1,7 @@
 const express = require('express');
 const supabase = require('../lib/supabase');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { authMiddleware, JWT_SECRET } = require('../middleware/auth');
 
 // Login opcional: rotas públicas mostram o telefone do anunciante só para quem está logado
@@ -211,6 +212,42 @@ router.patch('/:id/status', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Erro ao atualizar status do lote:', err);
     res.status(500).json({ error: 'Erro ao atualizar status do lote' });
+  }
+});
+
+// POST /cafes/:id/visualizacao — conta uma visualização real dos detalhes do lote.
+// Uma por visitante, por lote, por dia. O dono vendo o próprio lote não conta.
+// Visitante logado = id do usuário; anônimo = hash de IP + navegador (não guarda o IP).
+router.post('/:id/visualizacao', async (req, res) => {
+  try {
+    const { data: cafe } = await supabase
+      .from('cafes').select('id, usuario_id').eq('id', req.params.id).single();
+    if (!cafe) return res.status(404).json({ error: 'Lote não encontrado' });
+
+    const logado = usuarioLogado(req);
+    if (logado?.id === cafe.usuario_id) return res.json({ ok: true, contada: false });
+
+    let visitante;
+    if (logado?.id) {
+      visitante = `u:${logado.id}`;
+    } else {
+      const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim();
+      const ua = String(req.headers['user-agent'] || '');
+      visitante = 'a:' + crypto.createHash('sha256').update(`${ip}|${ua}`).digest('hex').slice(0, 32);
+    }
+    const dia = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+
+    const { error } = await supabase
+      .from('visualizacoes_lote')
+      .upsert({ cafe_id: cafe.id, visitante, dia }, { onConflict: 'cafe_id,visitante,dia', ignoreDuplicates: true });
+    if (error) {
+      console.error('Erro ao registrar visualização:', error);
+      return res.json({ ok: false });
+    }
+    res.json({ ok: true, contada: true });
+  } catch (err) {
+    console.error('Erro visualizacao:', err);
+    res.json({ ok: false });
   }
 });
 

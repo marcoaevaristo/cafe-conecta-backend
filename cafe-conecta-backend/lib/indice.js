@@ -139,6 +139,7 @@ async function historicoMensal() {
   const { data, error } = await supabase
     .from('cafes')
     .select('tipo, regiao, preco_saca, quantidade_sacas, criado_em')
+    .in('status', ['ativo', 'pausado', 'vendido']) // encerrado = retirado, não é referência de preço
     .gte('criado_em', inicio.toISOString());
   if (error) throw error;
 
